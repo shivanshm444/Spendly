@@ -1,8 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, StatusBar, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTransactions } from '../context/TransactionContext';
+import * as Notifications from 'expo-notifications';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 const CATEGORIES = [
   { name: 'Food', emoji: '🍕', color: '#FF6B6B' },
@@ -19,9 +28,28 @@ const CATEGORIES = [
 
 export default function BudgetScreen() {
   const router = useRouter();
-  const { transactions } = useTransactions();
-  const [budgets, setBudgets] = useState<{ [key: string]: string }>({});
+  const { transactions, budgets, setBudgets } = useTransactions();
   const [editing, setEditing] = useState<string | null>(null);
+  const [tempBudgets, setTempBudgets] = useState<{ [key: string]: string }>({});
+
+  useEffect(() => {
+    registerForNotifications();
+    setTempBudgets({ ...budgets });
+  }, []);
+
+  const registerForNotifications = async () => {
+    const { status } = await Notifications.requestPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow notifications for budget alerts!');
+    }
+  };
+
+  const sendNotification = async (title: string, body: string) => {
+    await Notifications.scheduleNotificationAsync({
+      content: { title, body, sound: true },
+      trigger: null,
+    });
+  };
 
   const getCategorySpent = (category: string) => {
     return transactions
@@ -32,7 +60,7 @@ export default function BudgetScreen() {
   const getProgressColor = (spent: number, budget: number) => {
     const percent = (spent / budget) * 100;
     if (percent >= 100) return '#FF6B6B';
-    if (percent >= 80) return '#F39C12';
+    if (percent >= 90) return '#F39C12';
     return '#2ECC71';
   };
 
@@ -40,15 +68,47 @@ export default function BudgetScreen() {
     return Math.min((spent / budget) * 100, 100);
   };
 
-  const handleSaveBudget = (category: string) => {
-    const budget = parseFloat(budgets[category] || '0');
+  const handleSaveBudget = async (category: string) => {
+    const budget = parseFloat(tempBudgets[category] || '0');
+    if (!budget || budget <= 0) {
+      Alert.alert('❌ Invalid', 'Please enter a valid budget amount!');
+      return;
+    }
+
+    // Save to global context
+    const updatedBudgets = { ...budgets, [category]: String(budget) };
+    setBudgets(updatedBudgets);
+
     const spent = getCategorySpent(category);
-    if (spent >= budget * 0.8 && spent < budget) {
-      Alert.alert('⚠️ Warning!', `You have used 80% of your ${category} budget!`);
-    } else if (spent >= budget) {
-      Alert.alert('🚨 Over Budget!', `You have exceeded your ${category} budget!`);
+    const percent = (spent / budget) * 100;
+
+    if (percent >= 100) {
+      Alert.alert(
+        '🚨 Over Budget!',
+        `You exceeded your ${category} budget!\n\nSpent: ₹${spent.toFixed(0)}\nBudget: ₹${budget.toFixed(0)}`
+      );
+      await sendNotification(
+        '🚨 Over Budget!',
+        `You exceeded your ${category} budget! Spent ₹${spent.toFixed(0)} of ₹${budget.toFixed(0)}`
+      );
+    } else if (percent >= 90) {
+      Alert.alert(
+        '⚠️ 90% Alert!',
+        `You used ${percent.toFixed(0)}% of your ${category} budget!\n\nRemaining: ₹${(budget - spent).toFixed(0)}`
+      );
+      await sendNotification(
+        '⚠️ Budget Warning!',
+        `You used ${percent.toFixed(0)}% of your ${category} budget! Only ₹${(budget - spent).toFixed(0)} remaining.`
+      );
     } else {
-      Alert.alert('✅ Budget Set!', `${category} budget set to ₹${budget}`);
+      Alert.alert(
+        '✅ Budget Set!',
+        `${category} budget set to ₹${budget.toFixed(0)}\n\nRemaining: ₹${(budget - spent).toFixed(0)}`
+      );
+      await sendNotification(
+        '✅ Budget Set!',
+        `Your ${category} budget is set to ₹${budget.toFixed(0)}`
+      );
     }
     setEditing(null);
   };
@@ -60,7 +120,6 @@ export default function BudgetScreen() {
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <StatusBar barStyle="light-content" backgroundColor="#0A0A0F" />
 
-      {/* Header */}
       <LinearGradient colors={['#1a0533', '#0A0A0F']} style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Back</Text>
@@ -68,7 +127,6 @@ export default function BudgetScreen() {
         <Text style={styles.headerTitle}>Budget Alerts 🎯</Text>
       </LinearGradient>
 
-      {/* Total Budget Card */}
       <LinearGradient
         colors={['#7C3AED', '#4F46E5']}
         start={{ x: 0, y: 0 }}
@@ -112,13 +170,21 @@ export default function BudgetScreen() {
                 </View>
                 <View>
                   <Text style={styles.categoryName}>{cat.name}</Text>
-                  <Text style={styles.spentText}>Spent: ₹{spent.toFixed(0)}</Text>
+                  <Text style={styles.spentText}>
+                    Spent: ₹{spent.toFixed(0)}
+                    {hasbudget ? ` / ₹${budget.toFixed(0)}` : ''}
+                  </Text>
                 </View>
               </View>
               <TouchableOpacity
                 style={styles.editButton}
-                onPress={() => setEditing(editing === cat.name ? null : cat.name)}>
-                <Text style={styles.editButtonText}>{editing === cat.name ? 'Cancel' : 'Set'}</Text>
+                onPress={() => {
+                  setTempBudgets({ ...tempBudgets, [cat.name]: budgets[cat.name] || '' });
+                  setEditing(editing === cat.name ? null : cat.name);
+                }}>
+                <Text style={styles.editButtonText}>
+                  {editing === cat.name ? 'Cancel' : hasbudget ? 'Edit' : 'Set'}
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -129,8 +195,8 @@ export default function BudgetScreen() {
                   placeholder="Enter budget amount"
                   placeholderTextColor="#444"
                   keyboardType="numeric"
-                  value={budgets[cat.name] || ''}
-                  onChangeText={(val) => setBudgets({ ...budgets, [cat.name]: val })}
+                  value={tempBudgets[cat.name] || ''}
+                  onChangeText={(val) => setTempBudgets({ ...tempBudgets, [cat.name]: val })}
                 />
                 <TouchableOpacity
                   style={styles.saveBtn}
@@ -152,7 +218,7 @@ export default function BudgetScreen() {
                   <Text style={styles.progressText}>{progressPercent.toFixed(0)}% used</Text>
                   <Text style={styles.budgetText}>Budget: ₹{budget.toFixed(0)}</Text>
                 </View>
-                {progressPercent >= 80 && (
+                {progressPercent >= 90 && (
                   <View style={styles.alertBadge}>
                     <Text style={styles.alertText}>
                       {progressPercent >= 100 ? '🚨 Over Budget!' : '⚠️ Almost at limit!'}
