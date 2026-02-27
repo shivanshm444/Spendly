@@ -1,98 +1,206 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useState } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useTransactions } from '../../context/TransactionContext';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+const MOCK_SMS = [
+  { body: "Your A/c XX1234 debited Rs.450.00 on 27-Feb-26 at SWIGGY. Avl Bal Rs.12,500", date: "1740614400000" },
+  { body: "Your A/c XX1234 debited Rs.1200.00 on 26-Feb-26 at AMAZON. Avl Bal Rs.13,700", date: "1740528000000" },
+  { body: "Your A/c XX1234 debited Rs.800.00 on 25-Feb-26 at ZOMATO. Avl Bal Rs.14,500", date: "1740441600000" },
+  { body: "Your A/c XX1234 debited Rs.2500.00 on 24-Feb-26 at RELIANCE PETROL. Avl Bal Rs.17,000", date: "1740355200000" },
+  { body: "Your A/c XX1234 debited Rs.350.00 on 23-Feb-26 at CAFE COFFEE DAY. Avl Bal Rs.17,350", date: "1740268800000" },
+  { body: "Your A/c XX1234 debited Rs.999.00 on 22-Feb-26 at NETFLIX. Avl Bal Rs.18,349", date: "1740182400000" },
+  { body: "Your A/c XX1234 debited Rs.3200.00 on 21-Feb-26 at BIG BAZAAR. Avl Bal Rs.21,549", date: "1740096000000" },
+];
+
+const parseBankSMS = (message: string, date: string) => {
+  const amountMatch = message.match(/Rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  if (!amountMatch) return null;
+  const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+  const isDebit = /debited/i.test(message);
+  if (!isDebit) return null;
+  const merchantMatch = message.match(/at\s+([A-Z][A-Z\s]+?)(?:\.|,|\s+Avl)/);
+  const merchant = merchantMatch ? merchantMatch[1].trim() : 'Unknown';
+  return { amount, merchant, date, message, category: '', notes: '' };
+};
+
+const getCategoryColor = (merchant: string) => {
+  const m = merchant.toLowerCase();
+  if (m.includes('swiggy') || m.includes('zomato') || m.includes('cafe')) return '#FF6B6B';
+  if (m.includes('amazon') || m.includes('flipkart')) return '#4ECDC4';
+  if (m.includes('netflix') || m.includes('spotify')) return '#9B59B6';
+  if (m.includes('petrol') || m.includes('fuel')) return '#F39C12';
+  if (m.includes('bazaar') || m.includes('mart')) return '#2ECC71';
+  return '#2E86AB';
+};
+
+const getCategoryEmoji = (merchant: string) => {
+  const m = merchant.toLowerCase();
+  if (m.includes('swiggy') || m.includes('zomato') || m.includes('cafe')) return '🍕';
+  if (m.includes('amazon') || m.includes('flipkart')) return '🛒';
+  if (m.includes('netflix') || m.includes('spotify')) return '🎬';
+  if (m.includes('petrol') || m.includes('fuel')) return '⛽';
+  if (m.includes('bazaar') || m.includes('mart')) return '🏪';
+  return '💳';
+};
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const router = useRouter();
+  const { transactions, setTransactions } = useTransactions();
+  const [fetched, setFetched] = useState(false);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const totalSpent = transactions.reduce((sum, t) => sum + t.amount, 0);
+
+  const fetchMessages = () => {
+    const parsed: any[] = [];
+    MOCK_SMS.forEach((sms) => {
+      const result = parseBankSMS(sms.body, sms.date);
+      if (result) parsed.push(result);
+    });
+    setTransactions([...parsed]);
+    setFetched(true);
+    Alert.alert('✅ Done!', `Found ${parsed.length} transactions!`);
+  };
+
+  return (
+    <ScrollView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>BankTracker 💰</Text>
+        <Text style={styles.headerSubtitle}>Your Smart Expense Manager</Text>
+      </View>
+
+      <View style={styles.balanceCard}>
+        <Text style={styles.balanceLabel}>Total Spent This Month</Text>
+        <Text style={styles.balanceAmount}>₹{totalSpent.toFixed(2)}</Text>
+        {fetched && <Text style={styles.transactionCount}>{transactions.length} transactions</Text>}
+      </View>
+
+      <TouchableOpacity style={styles.button} onPress={fetchMessages}>
+        <Text style={styles.buttonText}>📩 Fetch Bank Messages</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.sectionTitle}>Recent Transactions</Text>
+
+      {transactions.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyIcon}>📭</Text>
+          <Text style={styles.emptyText}>No transactions yet.</Text>
+          <Text style={styles.emptySubText}>Tap "Fetch Bank Messages" to start!</Text>
+        </View>
+      ) : (
+        transactions.map((t, index) => (
+          <TouchableOpacity
+            key={index}
+            style={styles.transactionCard}
+            onPress={() => router.push({
+              pathname: '/annotation',
+              params: {
+                merchant: t.merchant,
+                amount: String(t.amount),
+                date: t.date,
+                index: String(index)
+              }
+            })}>
+            <View style={[styles.categoryDot, { backgroundColor: getCategoryColor(t.merchant) }]}>
+              <Text style={styles.categoryEmoji}>{getCategoryEmoji(t.merchant)}</Text>
+            </View>
+            <View style={styles.transactionLeft}>
+              <Text style={styles.merchantName}>{t.merchant}</Text>
+              <Text style={styles.transactionDate}>
+                {new Date(parseInt(t.date)).toLocaleDateString('en-IN')}
+              </Text>
+             {t.category ? (
+  <Text style={styles.categoryTag}>🏷️ {t.category}</Text>
+) : (
+  <Text style={styles.tapToAnnotate}>Tap to add category</Text>
+)}
+{t.notes ? (
+  <Text style={styles.notesPreview}>📝 {t.notes}</Text>
+) : null}
+            </View>
+            <Text style={styles.transactionAmount}>₹{t.amount.toFixed(2)}</Text>
+          </TouchableOpacity>
+        ))
+      )}
+
+      <View style={{ height: 30 }} />
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: { flex: 1, backgroundColor: '#f0f4f8' },
+  header: {
+    backgroundColor: '#2E86AB',
+    padding: 30,
+    paddingTop: 60,
+    alignItems: 'center',
+  },
+  headerTitle: { fontSize: 28, fontWeight: 'bold', color: 'white' },
+  headerSubtitle: { fontSize: 14, color: '#d0eaf5', marginTop: 5 },
+  balanceCard: {
+    backgroundColor: 'white',
+    margin: 20,
+    padding: 25,
+    borderRadius: 20,
+    alignItems: 'center',
+    elevation: 5,
+  },
+  balanceLabel: { fontSize: 14, color: '#888' },
+  balanceAmount: { fontSize: 40, fontWeight: 'bold', color: '#2E86AB', marginTop: 5 },
+  transactionCount: { fontSize: 12, color: '#aaa', marginTop: 5 },
+  button: {
+    backgroundColor: '#2E86AB',
+    marginHorizontal: 20,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    elevation: 3,
+  },
+  buttonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginHorizontal: 20,
+    marginTop: 25,
+    marginBottom: 10,
+    color: '#333',
+  },
+  emptyBox: {
+    backgroundColor: 'white',
+    marginHorizontal: 20,
+    padding: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    elevation: 2,
+  },
+  emptyIcon: { fontSize: 40, marginBottom: 10 },
+  emptyText: { color: '#555', fontSize: 16, fontWeight: 'bold' },
+  emptySubText: { color: '#aaa', fontSize: 13, marginTop: 5 },
+  transactionCard: {
+    backgroundColor: 'white',
+    marginHorizontal: 20,
+    marginBottom: 10,
+    padding: 15,
+    borderRadius: 15,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    elevation: 2,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  categoryDot: {
+    width: 45,
+    height: 45,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  categoryEmoji: { fontSize: 20 },
+  transactionLeft: { flex: 1 },
+  merchantName: { fontSize: 15, fontWeight: 'bold', color: '#333' },
+  transactionDate: { fontSize: 12, color: '#aaa', marginTop: 2 },
+  categoryTag: { fontSize: 12, color: '#2E86AB', marginTop: 3 },
+  tapToAnnotate: { fontSize: 11, color: '#ccc', marginTop: 3, fontStyle: 'italic' },
+  notesPreview: { fontSize: 11, color: '#888', marginTop: 2, fontStyle: 'italic' },
+  transactionAmount: { fontSize: 16, fontWeight: 'bold', color: '#e74c3c' },
 });
