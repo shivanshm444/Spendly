@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTransactions } from '../../context/TransactionContext';
 
 const MOCK_SMS = [
@@ -78,7 +78,9 @@ export default function HomeScreen() {
       <TouchableOpacity style={styles.button} onPress={fetchMessages}>
         <Text style={styles.buttonText}>📩 Fetch Bank Messages</Text>
       </TouchableOpacity>
-
+<TouchableOpacity style={styles.dashboardButton} onPress={() => router.push('/dashboard')}>
+  <Text style={styles.dashboardButtonText}>📊 View Dashboard</Text>
+</TouchableOpacity>
       <Text style={styles.sectionTitle}>Recent Transactions</Text>
 
       {transactions.length === 0 ? (
@@ -201,6 +203,19 @@ const styles = StyleSheet.create({
   transactionDate: { fontSize: 12, color: '#aaa', marginTop: 2 },
   categoryTag: { fontSize: 12, color: '#2E86AB', marginTop: 3 },
   tapToAnnotate: { fontSize: 11, color: '#ccc', marginTop: 3, fontStyle: 'italic' },
-  notesPreview: { fontSize: 11, color: '#888', marginTop: 2, fontStyle: 'italic' },
   transactionAmount: { fontSize: 16, fontWeight: 'bold', color: '#e74c3c' },
+  notesPreview: { fontSize: 11, color: '#888', marginTop: 2, fontStyle: 'italic' },
+  dashboardButton: {
+    backgroundColor: 'white',
+    marginHorizontal: 20,
+    marginTop: 10,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#2E86AB',
+  },
+  dashboardButtonText: { color: '#2E86AB', fontSize: 16, fontWeight: 'bold' },
 });
+
