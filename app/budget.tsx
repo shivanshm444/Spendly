@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, StatusBar, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useTransactions } from '../context/TransactionContext';
 import * as Notifications from 'expo-notifications';
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Alert, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useTransactions } from '../context/TransactionContext';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -25,6 +25,28 @@ const CATEGORIES = [
   { name: 'Education', emoji: '📚', color: '#1ABC9C' },
   { name: 'Other', emoji: '💳', color: '#95A5A6' },
 ];
+
+const getPrediction = (spent: number, budget: number) => {
+  if (spent === 0 || budget === 0) return null;
+  const today = new Date();
+  const daysPassed = today.getDate();
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const daysRemaining = daysInMonth - daysPassed;
+  if (daysPassed === 0) return null;
+  const dailyAvg = spent / daysPassed;
+  const projectedTotal = dailyAvg * daysInMonth;
+  const overspend = projectedTotal - budget;
+  const daysUntilBudgetFinished = budget / dailyAvg;
+  return {
+    projectedTotal,
+    overspend,
+    dailyAvg,
+    daysRemaining,
+    daysUntilBudgetFinished,
+    daysPassed,
+    daysInMonth
+  };
+};
 
 export default function BudgetScreen() {
   const router = useRouter();
@@ -74,40 +96,25 @@ export default function BudgetScreen() {
       Alert.alert('❌ Invalid', 'Please enter a valid budget amount!');
       return;
     }
-
-    // Save to global context
     const updatedBudgets = { ...budgets, [category]: String(budget) };
     setBudgets(updatedBudgets);
-
     const spent = getCategorySpent(category);
     const percent = (spent / budget) * 100;
-
     if (percent >= 100) {
-      Alert.alert(
-        '🚨 Over Budget!',
-        `You exceeded your ${category} budget!\n\nSpent: ₹${spent.toFixed(0)}\nBudget: ₹${budget.toFixed(0)}`
-      );
-      await sendNotification(
-        '🚨 Over Budget!',
-        `You exceeded your ${category} budget! Spent ₹${spent.toFixed(0)} of ₹${budget.toFixed(0)}`
-      );
+      Alert.alert('🚨 Over Budget!', `You exceeded your ${category} budget!\n\nSpent: ₹${spent.toFixed(0)}\nBudget: ₹${budget.toFixed(0)}`);
+      await sendNotification('🚨 Over Budget!', `You exceeded your ${category} budget! Spent ₹${spent.toFixed(0)} of ₹${budget.toFixed(0)}`);
     } else if (percent >= 90) {
-      Alert.alert(
-        '⚠️ 90% Alert!',
-        `You used ${percent.toFixed(0)}% of your ${category} budget!\n\nRemaining: ₹${(budget - spent).toFixed(0)}`
-      );
-      await sendNotification(
-        '⚠️ Budget Warning!',
-        `You used ${percent.toFixed(0)}% of your ${category} budget! Only ₹${(budget - spent).toFixed(0)} remaining.`
-      );
+      Alert.alert('⚠️ 90% Alert!', `You used ${percent.toFixed(0)}% of your ${category} budget!\n\nRemaining: ₹${(budget - spent).toFixed(0)}`);
+      await sendNotification('⚠️ Budget Warning!', `You used ${percent.toFixed(0)}% of your ${category} budget! Only ₹${(budget - spent).toFixed(0)} remaining.`);
     } else {
-      Alert.alert(
-        '✅ Budget Set!',
-        `${category} budget set to ₹${budget.toFixed(0)}\n\nRemaining: ₹${(budget - spent).toFixed(0)}`
-      );
+      Alert.alert('✅ Budget Set!', `${category} budget set to ₹${budget.toFixed(0)}\n\nRemaining: ₹${(budget - spent).toFixed(0)}`);
+      await sendNotification('✅ Budget Set!', `Your ${category} budget is set to ₹${budget.toFixed(0)}`);
+    }
+    const prediction = getPrediction(spent, budget);
+    if (prediction && prediction.overspend > 0) {
       await sendNotification(
-        '✅ Budget Set!',
-        `Your ${category} budget is set to ₹${budget.toFixed(0)}`
+        '🔮 Spending Prediction!',
+        `At this rate you'll overspend on ${category} by ₹${prediction.overspend.toFixed(0)} this month!`
       );
     }
     setEditing(null);
@@ -115,6 +122,12 @@ export default function BudgetScreen() {
 
   const totalBudget = Object.values(budgets).reduce((sum, b) => sum + (parseFloat(b) || 0), 0);
   const totalSpent = transactions.reduce((sum, t) => sum + t.amount, 0);
+
+  const hasPredictions = CATEGORIES.some(cat => {
+    const spent = getCategorySpent(cat.name);
+    const budget = parseFloat(budgets[cat.name] || '0');
+    return getPrediction(spent, budget) !== null;
+  });
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -152,6 +165,43 @@ export default function BudgetScreen() {
         </View>
       </LinearGradient>
 
+      {/* Predictions Section */}
+      {hasPredictions && (
+        <View style={styles.predictionsSection}>
+          <Text style={styles.sectionTitle}>🔮 Spending Predictions</Text>
+          {CATEGORIES.map(cat => {
+            const spent = getCategorySpent(cat.name);
+            const budget = parseFloat(budgets[cat.name] || '0');
+            const prediction = getPrediction(spent, budget);
+            if (!prediction) return null;
+            return (
+              <View key={cat.name} style={styles.predictionCard}>
+                <Text style={styles.predictionEmoji}>{cat.emoji}</Text>
+                <View style={styles.predictionText}>
+                  <Text style={styles.predictionTitle}>{cat.name} — End of Month</Text>
+                  <Text style={styles.predictionAmount}>
+                    📅 Projected: ₹{prediction.projectedTotal.toFixed(0)}
+                  </Text>
+                  <Text style={[styles.predictionStatus, { color: prediction.overspend > 0 ? '#FF6B6B' : '#2ECC71' }]}>
+                    {prediction.overspend > 0
+                      ? `⚠️ Will exceed by ₹${prediction.overspend.toFixed(0)}`
+                      : `✅ Will save ₹${Math.abs(prediction.overspend).toFixed(0)}`}
+                  </Text>
+                  <Text style={styles.predictionSub}>
+                    📊 Daily avg: ₹{prediction.dailyAvg.toFixed(0)} | {prediction.daysRemaining} days left
+                  </Text>
+                  {prediction.daysUntilBudgetFinished < prediction.daysInMonth && (
+                    <Text style={styles.predictionWarning}>
+                      🚨 Budget runs out in {Math.max(0, prediction.daysUntilBudgetFinished - prediction.daysPassed).toFixed(0)} days!
+                    </Text>
+                  )}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       <Text style={styles.sectionTitle}>Set Category Budgets</Text>
 
       {CATEGORIES.map((cat) => {
@@ -171,8 +221,7 @@ export default function BudgetScreen() {
                 <View>
                   <Text style={styles.categoryName}>{cat.name}</Text>
                   <Text style={styles.spentText}>
-                    Spent: ₹{spent.toFixed(0)}
-                    {hasbudget ? ` / ₹${budget.toFixed(0)}` : ''}
+                    Spent: ₹{spent.toFixed(0)}{hasbudget ? ` / ₹${budget.toFixed(0)}` : ''}
                   </Text>
                 </View>
               </View>
@@ -198,9 +247,7 @@ export default function BudgetScreen() {
                   value={tempBudgets[cat.name] || ''}
                   onChangeText={(val) => setTempBudgets({ ...tempBudgets, [cat.name]: val })}
                 />
-                <TouchableOpacity
-                  style={styles.saveBtn}
-                  onPress={() => handleSaveBudget(cat.name)}>
+                <TouchableOpacity style={styles.saveBtn} onPress={() => handleSaveBudget(cat.name)}>
                   <Text style={styles.saveBtnText}>Save</Text>
                 </TouchableOpacity>
               </View>
@@ -257,6 +304,25 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: 11, color: 'rgba(255,255,255,0.7)', textAlign: 'center' },
   totalAmount: { fontSize: 18, fontWeight: 'bold', color: 'white', textAlign: 'center', marginTop: 4 },
   divider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.2)' },
+  predictionsSection: { marginTop: 20 },
+  predictionCard: {
+    backgroundColor: '#1a0a0a',
+    marginHorizontal: 20,
+    marginBottom: 10,
+    padding: 15,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#FF6B6B30',
+  },
+  predictionEmoji: { fontSize: 28, marginRight: 12, marginTop: 2 },
+  predictionText: { flex: 1 },
+  predictionTitle: { fontSize: 13, color: '#888', fontWeight: 'bold' },
+  predictionAmount: { fontSize: 15, fontWeight: 'bold', color: 'white', marginTop: 4 },
+  predictionStatus: { fontSize: 13, fontWeight: 'bold', marginTop: 4 },
+  predictionSub: { fontSize: 11, color: '#555', marginTop: 4 },
+  predictionWarning: { fontSize: 12, color: '#FF6B6B', marginTop: 4, fontWeight: 'bold' },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',

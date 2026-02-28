@@ -3,6 +3,8 @@ import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, StatusBar 
 import { useRouter } from 'expo-router';
 import { useTransactions } from '../../context/TransactionContext';
 import { LinearGradient } from 'expo-linear-gradient';
+import { signOut } from 'firebase/auth';
+import { auth } from '../../firebase.config';
 
 const MOCK_SMS = [
   { body: "Your A/c XX1234 debited Rs.450.00 on 27-Feb-26 at SWIGGY. Avl Bal Rs.12,500", date: "1740614400000" },
@@ -52,6 +54,18 @@ export default function HomeScreen() {
 
   const totalSpent = transactions.reduce((sum, t) => sum + t.amount, 0);
 
+  const handleLogout = async () => {
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout', style: 'destructive', onPress: async () => {
+          await signOut(auth);
+          router.replace('/login');
+        }
+      }
+    ]);
+  };
+
   const fetchMessages = () => {
     const parsed: any[] = [];
     MOCK_SMS.forEach((sms) => {
@@ -73,8 +87,8 @@ export default function HomeScreen() {
             <Text style={styles.greeting}>Good day 👋</Text>
             <Text style={styles.headerTitle}>BankTracker</Text>
           </View>
-          <TouchableOpacity style={styles.dashboardIconBtn} onPress={() => router.push('/dashboard')}>
-            <Text style={styles.dashboardIcon}>📊</Text>
+          <TouchableOpacity style={styles.dashboardIconBtn} onPress={handleLogout}>
+            <Text style={styles.dashboardIcon}>🚪</Text>
           </TouchableOpacity>
         </View>
 
@@ -183,7 +197,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#7C3AED30',
+    borderColor: '#FF6B6B30',
   },
   dashboardIcon: { fontSize: 22 },
   balanceCard: {
