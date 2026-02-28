@@ -87,9 +87,9 @@ export default function HomeScreen() {
             <Text style={styles.greeting}>Good day 👋</Text>
             <Text style={styles.headerTitle}>BankTracker</Text>
           </View>
-          <TouchableOpacity style={styles.dashboardIconBtn} onPress={handleLogout}>
-            <Text style={styles.dashboardIcon}>🚪</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={styles.dashboardIconBtn} onPress={() => router.push('/profile')}>
+  <Text style={styles.dashboardIcon}>👤</Text>
+</TouchableOpacity>
         </View>
 
         <LinearGradient

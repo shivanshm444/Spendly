@@ -11,6 +11,7 @@ export default function RootLayout() {
         <Stack.Screen name="annotation" options={{ headerShown: false }} />
         <Stack.Screen name="dashboard" options={{ headerShown: false }} />
         <Stack.Screen name="budget" options={{ headerShown: false }} />
+        <Stack.Screen name="profile" options={{ headerShown: false }} />
       </Stack>
     </TransactionProvider>
   );
