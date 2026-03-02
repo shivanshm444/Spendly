@@ -59,22 +59,22 @@ export default function ProfileScreen() {
         <Text style={styles.infoValue}>
           {user?.metadata?.creationTime
             ? new Date(user.metadata.creationTime).toLocaleDateString('en-IN', {
-                day: 'numeric', month: 'long', year: 'numeric'
-              })
+              day: 'numeric', month: 'long', year: 'numeric'
+            })
             : 'Not available'}
         </Text>
       </View>
 
       <View style={styles.infoCard}>
         <Text style={styles.infoLabel}>App Version</Text>
-        <Text style={styles.infoValue}>BankTracker v1.0.0</Text>
+        <Text style={styles.infoValue}>Spendly v1.0.0</Text>
       </View>
 
       {/* About */}
       <View style={styles.aboutCard}>
-        <Text style={styles.aboutTitle}>About BankTracker</Text>
+        <Text style={styles.aboutTitle}>About Spendly</Text>
         <Text style={styles.aboutText}>
-          BankTracker automatically reads your bank SMS messages, categorizes your spending using AI, and helps you manage your budget smartly. Built with ❤️ for hackathon 2026.
+          Spendly automatically reads your bank SMS messages, categorizes your spending using AI, and helps you manage your budget smartly. Built with ❤️ for hackathon 2026.
         </Text>
       </View>
 

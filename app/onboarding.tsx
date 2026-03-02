@@ -9,7 +9,7 @@ const SLIDES = [
   {
     emoji: '📱',
     title: 'Smart SMS Detection',
-    desc: 'BankTracker automatically reads your bank SMS messages and extracts transaction details instantly.',
+    desc: 'Spendly automatically reads your bank SMS messages and extracts transaction details instantly.',
     color: ['#1a0533', '#0A0A0F'],
     accent: '#7C3AED',
   },
@@ -67,7 +67,7 @@ export default function OnboardingScreen() {
 
         {/* App name on first slide */}
         {currentSlide === 0 && (
-          <Text style={styles.appName}>BankTracker</Text>
+          <Text style={styles.appName}>Spendly</Text>
         )}
 
         <Text style={styles.title}>{slide.title}</Text>

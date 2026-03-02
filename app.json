@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "BankTracker",
+    "name": "Spendly",
     "slug": "BankTracker",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "banktracker",
+    "scheme": "spendly",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -24,7 +24,8 @@
       "permissions": [
         "android.permission.READ_SMS",
         "android.permission.RECEIVE_SMS",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
       ]
     },
     "web": {
@@ -32,6 +33,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "./plugins/withSmsReceiver",
       "expo-router",
       [
         "expo-splash-screen",

@@ -249,7 +249,7 @@ export default function HomeScreen() {
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.greeting}>Good day 👋</Text>
-            <Text style={styles.headerTitle}>BankTracker</Text>
+            <Text style={styles.headerTitle}>Spendly</Text>
           </View>
           <TouchableOpacity style={styles.dashboardIconBtn} onPress={() => router.push('/profile')}>
             <Text style={styles.dashboardIcon}>👤</Text>

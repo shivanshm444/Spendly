@@ -32,8 +32,8 @@ export default function LoginScreen() {
     } catch (error: any) {
       const message = error.code === 'auth/invalid-credential' ? 'Invalid email or password!' :
         error.code === 'auth/email-already-in-use' ? 'Email already registered!' :
-        error.code === 'auth/invalid-email' ? 'Invalid email address!' :
-        'Something went wrong. Try again!';
+          error.code === 'auth/invalid-email' ? 'Invalid email address!' :
+            'Something went wrong. Try again!';
       Alert.alert('Error', message);
     }
     setLoading(false);
@@ -47,7 +47,7 @@ export default function LoginScreen() {
         <View style={styles.logoCircle}>
           <Text style={styles.logoEmoji}>💰</Text>
         </View>
-        <Text style={styles.appName}>BankTracker</Text>
+        <Text style={styles.appName}>Spendly</Text>
         <Text style={styles.tagline}>Your Smart Expense Manager</Text>
       </LinearGradient>
 

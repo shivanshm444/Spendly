@@ -10,6 +10,8 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -25,6 +27,26 @@ const CATEGORIES = [
   { name: 'Education', emoji: '📚', color: '#1ABC9C' },
   { name: 'Other', emoji: '💳', color: '#95A5A6' },
 ];
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const generateMonthOptions = () => {
+  const now = new Date();
+  const options = [];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    options.push({
+      key: `${d.getFullYear()}-${d.getMonth()}`,
+      month: d.getMonth(),
+      year: d.getFullYear(),
+      label: MONTHS[d.getMonth()],
+      yearLabel: d.getFullYear().toString(),
+      start: d.getTime(),
+      end: new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999).getTime(),
+    });
+  }
+  return options;
+};
 
 const getPrediction = (spent: number, budget: number) => {
   if (spent === 0 || budget === 0) return null;
@@ -54,6 +76,10 @@ export default function BudgetScreen() {
   const [editing, setEditing] = useState<string | null>(null);
   const [tempBudgets, setTempBudgets] = useState<{ [key: string]: string }>({});
 
+  const monthOptions = generateMonthOptions();
+  const [selectedMonth, setSelectedMonth] = useState(monthOptions[0].key);
+  const currentMonthData = monthOptions.find(m => m.key === selectedMonth)!;
+
   useEffect(() => {
     registerForNotifications();
     setTempBudgets({ ...budgets });
@@ -73,8 +99,14 @@ export default function BudgetScreen() {
     });
   };
 
+  // Filter transactions to selected month
+  const filteredTransactionsMonth = transactions.filter(t => {
+    const tDate = parseInt(t.date);
+    return !isNaN(tDate) && tDate >= currentMonthData.start && tDate <= currentMonthData.end;
+  });
+
   const getCategorySpent = (category: string) => {
-    return transactions
+    return filteredTransactionsMonth
       .filter(t => t.category === category)
       .reduce((sum, t) => sum + t.amount, 0);
   };
@@ -120,8 +152,13 @@ export default function BudgetScreen() {
     setEditing(null);
   };
 
-  const totalBudget = Object.values(budgets).reduce((sum, b) => sum + (parseFloat(b) || 0), 0);
-  const totalSpent = transactions.reduce((sum, t) => sum + t.amount, 0);
+  const totalBudget = parseFloat(budgets['_total'] || '0');
+  const sumOfCategoryBudgets = Object.entries(budgets)
+    .filter(([key]) => key !== '_total')
+    .reduce((sum, [_, b]) => sum + (parseFloat(b) || 0), 0);
+
+  const totalSpent = filteredTransactionsMonth.reduce((sum, t) => sum + t.amount, 0);
+  const remainingTotal = totalBudget > 0 ? totalBudget - totalSpent : sumOfCategoryBudgets - totalSpent;
 
   const hasPredictions = CATEGORIES.some(cat => {
     const spent = getCategorySpent(cat.name);
@@ -140,6 +177,28 @@ export default function BudgetScreen() {
         <Text style={styles.headerTitle}>Budget Alerts 🎯</Text>
       </LinearGradient>
 
+      {/* Month Picker */}
+      <View style={styles.monthPickerContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.monthPickerScroll}>
+          {monthOptions.map((m) => {
+            const isSelected = m.key === selectedMonth;
+            return (
+              <TouchableOpacity
+                key={m.key}
+                style={[styles.monthChip, isSelected && styles.monthChipSelected]}
+                onPress={() => setSelectedMonth(m.key)}>
+                <Text style={[styles.monthChipText, isSelected && styles.monthChipTextSelected]}>
+                  {m.label}
+                </Text>
+                <Text style={[styles.monthChipYear, isSelected && styles.monthChipYearSelected]}>
+                  {m.yearLabel}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
       <LinearGradient
         colors={['#7C3AED', '#4F46E5']}
         start={{ x: 0, y: 0 }}
@@ -147,8 +206,8 @@ export default function BudgetScreen() {
         style={styles.totalCard}>
         <View style={styles.totalRow}>
           <View>
-            <Text style={styles.totalLabel}>Total Budget</Text>
-            <Text style={styles.totalAmount}>₹{totalBudget.toFixed(0)}</Text>
+            <Text style={styles.totalLabel}>{totalBudget > 0 ? 'Monthly Limit' : 'Total Budget'}</Text>
+            <Text style={styles.totalAmount}>₹{(totalBudget > 0 ? totalBudget : sumOfCategoryBudgets).toFixed(0)}</Text>
           </View>
           <View style={styles.divider} />
           <View>
@@ -158,12 +217,68 @@ export default function BudgetScreen() {
           <View style={styles.divider} />
           <View>
             <Text style={styles.totalLabel}>Remaining</Text>
-            <Text style={[styles.totalAmount, { color: totalBudget - totalSpent < 0 ? '#FF6B6B' : '#2ECC71' }]}>
-              ₹{(totalBudget - totalSpent).toFixed(0)}
+            <Text style={[styles.totalAmount, { color: remainingTotal < 0 ? '#FF6B6B' : '#2ECC71' }]}>
+              ₹{remainingTotal.toFixed(0)}
             </Text>
           </View>
         </View>
+
+        {totalBudget > 0 && (
+          <View style={styles.overallProgressContainer}>
+            <View style={styles.overallProgressBar}>
+              <View style={[styles.overallProgressFill, {
+                width: `${Math.min((totalSpent / totalBudget) * 100, 100)}%`,
+                backgroundColor: (totalSpent / totalBudget) >= 1 ? '#FF6B6B' : (totalSpent / totalBudget) >= 0.9 ? '#F39C12' : '#2ECC71'
+              }]} />
+            </View>
+            <Text style={styles.overallProgressText}>
+              {((totalSpent / totalBudget) * 100).toFixed(0)}% of monthly limit used
+            </Text>
+          </View>
+        )}
       </LinearGradient>
+
+      {/* Set Monthly Limit Section */}
+      <View style={styles.budgetCard}>
+        <View style={styles.budgetHeader}>
+          <View style={styles.budgetLeft}>
+            <View style={[styles.categoryDot, { backgroundColor: '#7C3AED30' }]}>
+              <Text style={styles.categoryEmoji}>💰</Text>
+            </View>
+            <View>
+              <Text style={styles.categoryName}>Overall Monthly Limit</Text>
+              <Text style={styles.spentText}>
+                {totalBudget > 0 ? `Limit set to ₹${totalBudget.toFixed(0)}` : 'Set a global limit for the month'}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={() => {
+              setTempBudgets({ ...tempBudgets, ['_total']: budgets['_total'] || '' });
+              setEditing(editing === '_total' ? null : '_total');
+            }}>
+            <Text style={styles.editButtonText}>
+              {editing === '_total' ? 'Cancel' : totalBudget > 0 ? 'Edit' : 'Set'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {editing === '_total' && (
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.budgetInput}
+              placeholder="Enter monthly limit"
+              placeholderTextColor="#444"
+              keyboardType="numeric"
+              value={tempBudgets['_total'] || ''}
+              onChangeText={(val) => setTempBudgets({ ...tempBudgets, ['_total']: val })}
+            />
+            <TouchableOpacity style={styles.saveBtn} onPress={() => handleSaveBudget('_total')}>
+              <Text style={styles.saveBtnText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
 
       {/* Predictions Section */}
       {hasPredictions && (
@@ -294,16 +409,46 @@ const styles = StyleSheet.create({
   backButton: { marginRight: 15 },
   backText: { color: '#7C3AED', fontSize: 16, fontWeight: 'bold' },
   headerTitle: { fontSize: 22, fontWeight: 'bold', color: 'white' },
+
+  // Month Picker
+  monthPickerContainer: { marginTop: 10, marginBottom: 15 },
+  monthPickerScroll: { paddingHorizontal: 16, gap: 8 },
+  monthChip: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: '#1a1a2e',
+    borderWidth: 1,
+    borderColor: '#ffffff10',
+    alignItems: 'center',
+    minWidth: 65,
+  },
+  monthChipSelected: {
+    backgroundColor: '#7C3AED',
+    borderColor: '#7C3AED',
+  },
+  monthChipText: { fontSize: 14, fontWeight: 'bold', color: '#888' },
+  monthChipTextSelected: { color: 'white' },
+  monthChipYear: { fontSize: 10, color: '#555', marginTop: 1 },
+  monthChipYearSelected: { color: 'rgba(255,255,255,0.7)' },
+
   totalCard: {
     marginHorizontal: 20,
     padding: 22,
     borderRadius: 24,
     elevation: 10,
+    marginBottom: 5,
   },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel: { fontSize: 11, color: 'rgba(255,255,255,0.7)', textAlign: 'center' },
   totalAmount: { fontSize: 18, fontWeight: 'bold', color: 'white', textAlign: 'center', marginTop: 4 },
   divider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.2)' },
+
+  overallProgressContainer: { marginTop: 20 },
+  overallProgressBar: { height: 8, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 4, overflow: 'hidden' },
+  overallProgressFill: { height: 8, borderRadius: 4 },
+  overallProgressText: { color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 6, textAlign: 'center' },
+
   predictionsSection: { marginTop: 20 },
   predictionCard: {
     backgroundColor: '#1a0a0a',

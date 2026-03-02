@@ -47,7 +47,7 @@ export function useSmsListener(
                 PermissionsAndroid.PERMISSIONS.READ_SMS,
                 {
                     title: 'SMS Permission',
-                    message: 'BankTracker needs SMS access to auto-detect transactions.',
+                    message: 'Spendly needs SMS access to auto-detect transactions.',
                     buttonNeutral: 'Ask Me Later',
                     buttonNegative: 'Cancel',
                     buttonPositive: 'Allow',
@@ -57,7 +57,7 @@ export function useSmsListener(
                 PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
                 {
                     title: 'SMS Permission',
-                    message: 'BankTracker needs to receive SMS to auto-detect new transactions.',
+                    message: 'Spendly needs to receive SMS to auto-detect new transactions.',
                     buttonNeutral: 'Ask Me Later',
                     buttonNegative: 'Cancel',
                     buttonPositive: 'Allow',
