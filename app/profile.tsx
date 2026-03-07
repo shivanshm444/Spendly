@@ -28,14 +28,14 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0A0F" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      <LinearGradient colors={['#1a0533', '#0A0A0F']} style={styles.header}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Profile</Text>
-      </LinearGradient>
+      </View>
 
       {/* Avatar */}
       <View style={styles.avatarSection}>
@@ -89,62 +89,22 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A0A0F' },
-  header: {
-    padding: 20,
-    paddingTop: 55,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  header: { backgroundColor: '#FFFFFF', padding: 20, paddingTop: 55, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   backButton: { marginRight: 15 },
   backText: { color: '#7C3AED', fontSize: 16, fontWeight: 'bold' },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: 'white' },
-  avatarSection: {
-    alignItems: 'center',
-    paddingVertical: 30,
-  },
-  avatar: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 15,
-  },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A' },
+  avatarSection: { alignItems: 'center', paddingVertical: 30 },
+  avatar: { width: 90, height: 90, borderRadius: 45, alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
   avatarText: { fontSize: 40, fontWeight: 'bold', color: 'white' },
-  userName: { fontSize: 22, fontWeight: 'bold', color: 'white' },
-  userEmail: { fontSize: 14, color: '#555', marginTop: 5 },
-  infoCard: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    marginBottom: 10,
-    padding: 18,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
-  infoLabel: { fontSize: 12, color: '#555', marginBottom: 5 },
-  infoValue: { fontSize: 15, color: 'white', fontWeight: 'bold' },
-  aboutCard: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    marginBottom: 10,
-    padding: 18,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#7C3AED20',
-  },
+  userName: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A' },
+  userEmail: { fontSize: 14, color: '#9CA3AF', marginTop: 5 },
+  infoCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 18, borderRadius: 16, borderWidth: 1, borderColor: '#F3F4F6', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
+  infoLabel: { fontSize: 12, color: '#9CA3AF', marginBottom: 5 },
+  infoValue: { fontSize: 15, color: '#1A1A1A', fontWeight: 'bold' },
+  aboutCard: { backgroundColor: '#F5F3FF', marginHorizontal: 20, marginBottom: 10, padding: 18, borderRadius: 16, borderWidth: 1, borderColor: '#DDD6FE' },
   aboutTitle: { fontSize: 15, fontWeight: 'bold', color: '#7C3AED', marginBottom: 8 },
-  aboutText: { fontSize: 13, color: '#888', lineHeight: 20 },
-  logoutButton: {
-    backgroundColor: '#FF6B6B20',
-    marginHorizontal: 20,
-    marginTop: 10,
-    padding: 18,
-    borderRadius: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FF6B6B30',
-  },
-  logoutText: { color: '#FF6B6B', fontSize: 16, fontWeight: 'bold' },
+  aboutText: { fontSize: 13, color: '#6B7280', lineHeight: 20 },
+  logoutButton: { backgroundColor: '#FFF1F2', marginHorizontal: 20, marginTop: 10, padding: 18, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: '#FECDD3' },
+  logoutText: { color: '#E11D48', fontSize: 16, fontWeight: 'bold' },
 });

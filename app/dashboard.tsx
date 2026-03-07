@@ -61,6 +61,7 @@ export default function DashboardScreen() {
 
   const monthOptions = generateMonthOptions();
   const [selectedMonth, setSelectedMonth] = useState(monthOptions[0].key);
+  const [expandedCategories, setExpandedCategories] = useState<{ [key: string]: boolean }>({});
   const currentMonthData = monthOptions.find(m => m.key === selectedMonth)!;
 
   // Filter transactions to selected month
@@ -98,15 +99,15 @@ export default function DashboardScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0A0F" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
       {/* Header */}
-      <LinearGradient colors={['#1a0533', '#0A0A0F']} style={styles.header}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Dashboard</Text>
-      </LinearGradient>
+      </View>
 
       {/* Month Picker */}
       <View style={styles.monthPickerContainer}>
@@ -223,19 +224,81 @@ export default function DashboardScreen() {
       ) : (
         Object.entries(categoryTotals)
           .sort((a, b) => b[1] - a[1])
-          .map(([category, amount]) => (
-            <View key={category} style={styles.categoryRow}>
-              <View style={[styles.categoryDot, { backgroundColor: CATEGORY_COLORS[category] || '#95A5A6' }]} />
-              <Text style={styles.categoryName}>{category}</Text>
-              <View style={styles.categoryBarContainer}>
-                <View style={[styles.categoryBar, {
-                  width: `${(amount / totalSpent) * 100}%`,
-                  backgroundColor: CATEGORY_COLORS[category] || '#95A5A6'
-                }]} />
+          .map(([category, amount]) => {
+            const isExpanded = !!expandedCategories[category];
+            // Build subcategory + product breakdown for this category
+            const subTotals: { [key: string]: { amount: number; count: number } } = {};
+            filteredTransactions.forEach(t => {
+              if (t.category === category) {
+                if (t.splits && t.splits.length > 0) {
+                  t.splits.forEach(s => {
+                    if (s.category === category) {
+                      const key = s.description || 'Other';
+                      if (!subTotals[key]) subTotals[key] = { amount: 0, count: 0 };
+                      subTotals[key].amount += s.amount;
+                      subTotals[key].count += 1;
+                    }
+                  });
+                } else {
+                  const key = t.subCategory ? `${t.subCategory} › ${t.merchant}` : t.merchant;
+                  if (!subTotals[key]) subTotals[key] = { amount: 0, count: 0 };
+                  subTotals[key].amount += t.amount;
+                  subTotals[key].count += 1;
+                }
+              }
+            });
+            const sortedSubs = Object.entries(subTotals).sort((a, b) => b[1].amount - a[1].amount);
+            const catColor = CATEGORY_COLORS[category] || '#95A5A6';
+
+            return (
+              <View key={category}>
+                <TouchableOpacity
+                  style={[styles.categoryRow, isExpanded && styles.categoryRowExpanded]}
+                  onPress={() => setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }))}
+                  activeOpacity={0.7}>
+                  <View style={[styles.categoryDot, { backgroundColor: catColor }]} />
+                  <Text style={styles.categoryName}>{category}</Text>
+                  <View style={styles.categoryBarContainer}>
+                    <View style={[styles.categoryBar, {
+                      width: `${(amount / totalSpent) * 100}%`,
+                      backgroundColor: catColor
+                    }]} />
+                  </View>
+                  <Text style={styles.categoryAmount}>₹{amount.toFixed(0)}</Text>
+                  <Text style={styles.expandArrow}>{isExpanded ? '▾' : '▸'}</Text>
+                </TouchableOpacity>
+
+                {isExpanded && sortedSubs.length > 0 && (
+                  <View style={styles.subBreakdown}>
+                    {sortedSubs.map(([name, data]) => {
+                      const pct = (data.amount / amount) * 100;
+                      return (
+                        <View key={name} style={styles.subRow}>
+                          <View style={[styles.subDot, { backgroundColor: catColor + '60' }]} />
+                          <Text style={styles.subName} numberOfLines={1}>{name}</Text>
+                          <View style={styles.subBarContainer}>
+                            <View style={[styles.subBar, { width: `${pct}%`, backgroundColor: catColor + '40' }]} />
+                          </View>
+                          <View style={styles.subRight}>
+                            <Text style={[styles.subAmount, { color: catColor }]}>₹{data.amount.toFixed(0)}</Text>
+                            {data.count > 1 && (
+                              <Text style={styles.subCount}>{data.count}× · ₹{(data.amount / data.count).toFixed(0)}/ea</Text>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {isExpanded && sortedSubs.length === 0 && (
+                  <View style={styles.subBreakdown}>
+                    <Text style={styles.subEmptyText}>No detailed breakdown available</Text>
+                  </View>
+                )}
               </View>
-              <Text style={styles.categoryAmount}>₹{amount.toFixed(0)}</Text>
-            </View>
-          ))
+            );
+          })
       )}
 
       {/* Top Merchants */}
@@ -269,150 +332,142 @@ export default function DashboardScreen() {
         })()
       )}
 
+      {/* Product-wise Spending */}
+      <Text style={styles.sectionTitle}>🛍️ Product-wise Spending</Text>
+      {filteredTransactions.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyText}>No products tracked yet</Text>
+          <Text style={styles.emptySubText}>Add transactions to see per-product spending</Text>
+        </View>
+      ) : (
+        (() => {
+          const productMap: { [key: string]: { amount: number; count: number; category: string; subCategory: string } } = {};
+          filteredTransactions.forEach(t => {
+            // If transaction has splits, show each split item as a product
+            if (t.splits && t.splits.length > 0) {
+              t.splits.forEach(s => {
+                const key = s.description || 'Unnamed item';
+                if (!productMap[key]) productMap[key] = { amount: 0, count: 0, category: s.category, subCategory: '' };
+                productMap[key].amount += s.amount;
+                productMap[key].count += 1;
+              });
+            } else {
+              const key = t.merchant;
+              if (!productMap[key]) productMap[key] = { amount: 0, count: 0, category: t.category || '', subCategory: t.subCategory || '' };
+              productMap[key].amount += t.amount;
+              productMap[key].count += 1;
+            }
+          });
+          return Object.entries(productMap)
+            .sort((a, b) => b[1].amount - a[1].amount)
+            .map(([product, data]) => {
+              const catColor = CATEGORY_COLORS[data.category] || '#95A5A6';
+              const perItem = data.count > 0 ? data.amount / data.count : data.amount;
+              return (
+                <View key={product} style={styles.productRow}>
+                  <View style={[styles.productDot, { backgroundColor: catColor + '25' }]}>
+                    <Text style={styles.productDotText}>{product.charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={styles.productInfo}>
+                    <Text style={styles.productName} numberOfLines={1}>{product}</Text>
+                    <View style={styles.productMeta}>
+                      {data.category ? (
+                        <View style={[styles.productCatBadge, { backgroundColor: catColor + '18' }]}>
+                          <Text style={[styles.productCatText, { color: catColor }]}>{data.category}{data.subCategory ? ` › ${data.subCategory}` : ''}</Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.productCount}>{data.count}×</Text>
+                      {data.count > 1 && (
+                        <Text style={styles.productPerItem}>₹{perItem.toFixed(0)}/each</Text>
+                      )}
+                    </View>
+                  </View>
+                  <Text style={styles.productAmount}>₹{data.amount.toFixed(0)}</Text>
+                </View>
+              );
+            });
+        })()
+      )}
+
       <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A0A0F' },
-  header: {
-    padding: 20,
-    paddingTop: 55,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  header: { backgroundColor: '#FFFFFF', padding: 20, paddingTop: 55, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   backButton: { marginRight: 15 },
   backText: { color: '#7C3AED', fontSize: 16, fontWeight: 'bold' },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: 'white' },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A' },
 
   // Month Picker
   monthPickerContainer: { marginTop: 10, marginBottom: 5 },
   monthPickerScroll: { paddingHorizontal: 16, gap: 8 },
-  monthChip: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#1a1a2e',
-    borderWidth: 1,
-    borderColor: '#ffffff10',
-    alignItems: 'center',
-    minWidth: 65,
-  },
-  monthChipSelected: {
-    backgroundColor: '#7C3AED',
-    borderColor: '#7C3AED',
-  },
-  monthChipText: { fontSize: 14, fontWeight: 'bold', color: '#888' },
+  monthChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center', minWidth: 65 },
+  monthChipSelected: { backgroundColor: '#7C3AED', borderColor: '#7C3AED' },
+  monthChipText: { fontSize: 14, fontWeight: 'bold', color: '#6B7280' },
   monthChipTextSelected: { color: 'white' },
-  monthChipYear: { fontSize: 10, color: '#555', marginTop: 1 },
-  monthChipYearSelected: { color: 'rgba(255,255,255,0.7)' },
+  monthChipYear: { fontSize: 10, color: '#9CA3AF', marginTop: 1 },
+  monthChipYearSelected: { color: 'rgba(255,255,255,0.8)' },
 
-  summaryRow: {
-    flexDirection: 'row',
-    marginHorizontal: 20,
-    marginTop: 12,
-    gap: 10,
-  },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: '#1a1a2e',
-    padding: 15,
-    borderRadius: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
+  summaryRow: { flexDirection: 'row', marginHorizontal: 20, marginTop: 12, gap: 10 },
+  summaryCard: { flex: 1, backgroundColor: '#FFFFFF', padding: 15, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
   summaryEmoji: { fontSize: 24 },
-  summaryAmount: { fontSize: 16, fontWeight: 'bold', color: 'white', marginTop: 5 },
-  summaryLabel: { fontSize: 11, color: '#555', marginTop: 3 },
-  personalityCard: {
-    margin: 20,
-    padding: 22,
-    borderRadius: 24,
-    elevation: 10,
-  },
+  summaryAmount: { fontSize: 16, fontWeight: 'bold', color: '#1A1A1A', marginTop: 5 },
+  summaryLabel: { fontSize: 11, color: '#9CA3AF', marginTop: 3 },
+  personalityCard: { margin: 20, padding: 22, borderRadius: 24, elevation: 10 },
   personalityLabel: { fontSize: 12, color: 'rgba(255,255,255,0.6)' },
   personalityTitle: { fontSize: 26, fontWeight: 'bold', color: 'white', marginTop: 5 },
   personalityDesc: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 8, lineHeight: 20 },
-  chartCard: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    padding: 20,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
-  chartTitle: { fontSize: 16, fontWeight: 'bold', color: 'white', marginBottom: 10 },
-  emptyChart: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    padding: 30,
-    borderRadius: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
+  chartCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#F3F4F6', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
+  chartTitle: { fontSize: 16, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 10 },
+  emptyChart: { backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 30, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   emptyChartEmoji: { fontSize: 40, marginBottom: 10 },
-  emptyChartText: { color: '#555', fontSize: 14 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginHorizontal: 20,
-    marginTop: 25,
-    marginBottom: 12,
-    color: 'white',
-  },
-  emptyBox: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    padding: 30,
-    borderRadius: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
-  emptyText: { color: '#888', fontSize: 16, fontWeight: 'bold' },
-  emptySubText: { color: '#555', fontSize: 13, marginTop: 5 },
-  categoryRow: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    marginBottom: 10,
-    padding: 15,
-    borderRadius: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
+  emptyChartText: { color: '#9CA3AF', fontSize: 14 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginHorizontal: 20, marginTop: 25, marginBottom: 12, color: '#1A1A1A' },
+  emptyBox: { backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 30, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  emptyText: { color: '#6B7280', fontSize: 16, fontWeight: 'bold' },
+  emptySubText: { color: '#9CA3AF', fontSize: 13, marginTop: 5 },
+  categoryRow: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 14, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6', elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3 },
   categoryDot: { width: 10, height: 10, borderRadius: 5, marginRight: 10 },
-  categoryName: { fontSize: 14, fontWeight: 'bold', color: 'white', width: 100 },
-  categoryBarContainer: {
-    flex: 1,
-    height: 6,
-    backgroundColor: '#0A0A0F',
-    borderRadius: 3,
-    marginHorizontal: 10,
-  },
+  categoryName: { fontSize: 14, fontWeight: 'bold', color: '#1A1A1A', width: 100 },
+  categoryBarContainer: { flex: 1, height: 6, backgroundColor: '#F3F4F6', borderRadius: 3, marginHorizontal: 10 },
   categoryBar: { height: 6, borderRadius: 3 },
   categoryAmount: { fontSize: 13, fontWeight: 'bold', color: '#7C3AED' },
+  expandArrow: { fontSize: 14, color: '#9CA3AF', marginLeft: 6, fontWeight: 'bold' },
+  categoryRowExpanded: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, marginBottom: 0, borderBottomWidth: 0 },
+
+  // Subcategory breakdown
+  subBreakdown: { backgroundColor: '#FAFBFC', marginHorizontal: 20, marginBottom: 10, paddingHorizontal: 15, paddingVertical: 10, borderBottomLeftRadius: 14, borderBottomRightRadius: 14, borderWidth: 1, borderTopWidth: 0, borderColor: '#F3F4F6' },
+  subRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F3F4F610' },
+  subDot: { width: 6, height: 6, borderRadius: 3, marginRight: 8 },
+  subName: { fontSize: 13, color: '#4B5563', flex: 1, fontWeight: '500' },
+  subBarContainer: { width: 50, height: 4, backgroundColor: '#F3F4F6', borderRadius: 2, marginHorizontal: 8, overflow: 'hidden' },
+  subBar: { height: 4, borderRadius: 2 },
+  subRight: { alignItems: 'flex-end', minWidth: 65 },
+  subAmount: { fontSize: 13, fontWeight: 'bold' },
+  subCount: { fontSize: 10, color: '#9CA3AF', marginTop: 1 },
+  subEmptyText: { fontSize: 12, color: '#9CA3AF', textAlign: 'center', paddingVertical: 8 },
 
   // Top Merchants
-  merchantRow: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    marginBottom: 10,
-    padding: 15,
-    borderRadius: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
+  merchantRow: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 14, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6', elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3 },
   merchantIcon: { fontSize: 20, marginRight: 12 },
   merchantInfo: { flex: 1 },
-  merchantName: { fontSize: 14, fontWeight: 'bold', color: 'white' },
-  merchantCount: { fontSize: 11, color: '#555', marginTop: 2 },
-  merchantAmount: { fontSize: 14, fontWeight: 'bold', color: '#FF6B6B' },
+  merchantName: { fontSize: 14, fontWeight: 'bold', color: '#1A1A1A' },
+  merchantCount: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
+  merchantAmount: { fontSize: 14, fontWeight: 'bold', color: '#EF4444' },
 
+  // Product-wise Spending
+  productRow: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 14, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6', elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3 },
+  productDot: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  productDotText: { fontSize: 18, fontWeight: 'bold', color: '#6B7280' },
+  productInfo: { flex: 1 },
+  productName: { fontSize: 14, fontWeight: 'bold', color: '#1A1A1A' },
+  productMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' },
+  productCatBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  productCatText: { fontSize: 10, fontWeight: '700' },
+  productCount: { fontSize: 11, color: '#9CA3AF', fontWeight: '600' },
+  productPerItem: { fontSize: 11, color: '#7C3AED', fontWeight: '600' },
+  productAmount: { fontSize: 15, fontWeight: 'bold', color: '#EF4444' },
 });

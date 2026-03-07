@@ -10,22 +10,19 @@ const SLIDES = [
     emoji: '📱',
     title: 'Smart SMS Detection',
     desc: 'Spendly automatically reads your bank SMS messages and extracts transaction details instantly.',
-    color: ['#1a0533', '#0A0A0F'],
     accent: '#7C3AED',
   },
   {
     emoji: '🤖',
     title: 'AI Categorization',
     desc: 'Our AI automatically categorizes your spending into Food, Shopping, Travel and more — saving you time!',
-    color: ['#0a1628', '#0A0A0F'],
     accent: '#4F46E5',
   },
   {
     emoji: '📊',
     title: 'Smart Insights',
     desc: 'Get spending insights, budget alerts and discover your spending personality with beautiful charts.',
-    color: ['#0a2818', '#0A0A0F'],
-    accent: '#2ECC71',
+    accent: '#059669',
   },
 ];
 
@@ -48,8 +45,8 @@ export default function OnboardingScreen() {
   const slide = SLIDES[currentSlide];
 
   return (
-    <LinearGradient colors={slide.color as any} style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0A0F" />
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
       {/* Skip Button */}
       <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
@@ -59,18 +56,22 @@ export default function OnboardingScreen() {
       {/* Content */}
       <View style={styles.content}>
         {/* Emoji Circle */}
-        <View style={[styles.emojiCircle, { borderColor: slide.accent + '40', backgroundColor: slide.accent + '15' }]}>
-          <View style={[styles.emojiInner, { backgroundColor: slide.accent + '25' }]}>
+        <LinearGradient
+          colors={[slide.accent + '20', slide.accent + '08']}
+          style={[styles.emojiCircle, { borderColor: slide.accent + '30' }]}>
+          <LinearGradient
+            colors={[slide.accent + '30', slide.accent + '15']}
+            style={styles.emojiInner}>
             <Text style={styles.emoji}>{slide.emoji}</Text>
-          </View>
-        </View>
+          </LinearGradient>
+        </LinearGradient>
 
         {/* App name on first slide */}
         {currentSlide === 0 && (
           <Text style={styles.appName}>Spendly</Text>
         )}
 
-        <Text style={styles.title}>{slide.title}</Text>
+        <Text style={[styles.title, { color: '#1A1A1A' }]}>{slide.title}</Text>
         <Text style={styles.desc}>{slide.desc}</Text>
       </View>
 
@@ -78,7 +79,7 @@ export default function OnboardingScreen() {
       <View style={styles.bottom}>
         {/* Dots */}
         <View style={styles.dots}>
-          {SLIDES.map((_, i) => (
+          {SLIDES.map((s, i) => (
             <View
               key={i}
               style={[
@@ -100,19 +101,23 @@ export default function OnboardingScreen() {
           </LinearGradient>
         </TouchableOpacity>
       </View>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   skipButton: {
     position: 'absolute',
     top: 55,
     right: 25,
     zIndex: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 20,
   },
-  skipText: { color: '#555', fontSize: 15 },
+  skipText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
   content: {
     flex: 1,
     alignItems: 'center',
@@ -147,14 +152,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 30,
     fontWeight: 'bold',
-    color: 'white',
+    color: '#1A1A1A',
     textAlign: 'center',
     marginBottom: 16,
     lineHeight: 38,
   },
   desc: {
     fontSize: 16,
-    color: '#888',
+    color: '#6B7280',
     textAlign: 'center',
     lineHeight: 25,
   },
@@ -172,12 +177,17 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#333',
+    backgroundColor: '#E5E7EB',
   },
   nextButtonContainer: {
     width: '100%',
     borderRadius: 16,
     overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
   },
   nextButton: {
     padding: 18,

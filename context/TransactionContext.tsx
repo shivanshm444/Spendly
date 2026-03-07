@@ -102,7 +102,8 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   };
   const setTransactions = (t: Transaction[]) => {
     setTransactionsState(prev => {
-      const tid = (tx: Transaction) => `${tx.date}-${tx.amount}`;
+      // Use 3-field key (date+amount+merchant) — matches getSmsId in index.tsx
+      const tid = (tx: Transaction) => `${tx.date}-${tx.amount}-${tx.merchant}`;
 
       // Merge: keep existing categories if already categorized
       const merged = t.map(newTxn => {
@@ -180,7 +181,8 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       budgets,
       setBudgets,
       isLoaded,
-    }}>      {children}
+    }}>
+      {children}
     </TransactionContext.Provider>
   );
 }

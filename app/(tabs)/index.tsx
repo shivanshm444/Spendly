@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, StatusBar, Platform, AppState } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, StatusBar, Platform, AppState, Modal, TextInput, KeyboardAvoidingView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTransactions } from '../../context/TransactionContext';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -92,7 +92,7 @@ const mergeSmsWithExisting = (parsed: any[], existing: any[]): any[] => {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { transactions, setTransactions, setPendingTransaction, isLoaded } = useTransactions();
+  const { transactions, setTransactions, setPendingTransaction, addTransaction, isLoaded } = useTransactions();
   const [fetched, setFetched] = useState(false);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appState = useRef(AppState.currentState);
@@ -100,6 +100,12 @@ export default function HomeScreen() {
   const initialFetchDone = useRef(false);
   const transactionsRef = useRef(transactions);
   const isLoadedRef = useRef(isLoaded);
+
+  // Manual entry state
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualMerchant, setManualMerchant] = useState('');
+  const [manualAmount, setManualAmount] = useState('');
+  const [manualPayMode, setManualPayMode] = useState('Cash');
 
   useEffect(() => { transactionsRef.current = transactions; }, [transactions]);
   useEffect(() => { isLoadedRef.current = isLoaded; }, [isLoaded]);
@@ -250,11 +256,40 @@ export default function HomeScreen() {
     ]);
   };
 
+  const handleManualSave = () => {
+    const amt = parseFloat(manualAmount);
+    if (!manualMerchant.trim()) {
+      Alert.alert('Please enter a description');
+      return;
+    }
+    if (isNaN(amt) || amt <= 0) {
+      Alert.alert('Please enter a valid amount');
+      return;
+    }
+    const now = Date.now();
+    const newTxn = {
+      amount: amt,
+      merchant: manualMerchant.trim(),
+      date: String(now),
+      message: `Manual ${manualPayMode} payment: ${manualMerchant.trim()} ₹${amt}`,
+      category: '',
+      notes: '',
+    };
+    addTransaction(newTxn);
+    setShowManualEntry(false);
+    setManualMerchant('');
+    setManualAmount('');
+    setManualPayMode('Cash');
+    // Navigate to annotation for categorization
+    setPendingTransaction(newTxn);
+    router.push('/annotation');
+  };
+
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0A0F" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      <LinearGradient colors={['#1a0533', '#0A0A0F']} style={styles.header}>
+      <View style={styles.header}>
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.greeting}>Good day 👋</Text>
@@ -272,7 +307,7 @@ export default function HomeScreen() {
             <Text style={styles.categorizedCount}>📊 {transactions.length} total</Text>
           </View>
         </LinearGradient>
-      </LinearGradient>
+      </View>
 
       <View style={styles.monthPickerContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.monthPickerScroll}>
@@ -306,6 +341,14 @@ export default function HomeScreen() {
           <Text style={styles.budgetButtonText}>🎯 Budget</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Add Manual Transaction Button */}
+      <TouchableOpacity style={styles.addManualBtn} onPress={() => setShowManualEntry(true)} activeOpacity={0.85}>
+        <LinearGradient colors={['#10B981', '#059669']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.addManualGradient}>
+          <Text style={styles.addManualIcon}>＋</Text>
+          <Text style={styles.addManualText}>Add Cash / Manual Transaction</Text>
+        </LinearGradient>
+      </TouchableOpacity>
 
       <Text style={styles.sectionTitle}>{MONTHS[currentMonthData.month]} {currentMonthData.year} Transactions</Text>
 
@@ -370,17 +413,79 @@ export default function HomeScreen() {
         })
       )}
       <View style={{ height: 40 }} />
+
+      {/* Manual Entry Modal */}
+      <Modal visible={showManualEntry} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowManualEntry(false)} />
+          <View style={styles.modalCard}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>💸 Add Cash Transaction</Text>
+            <Text style={styles.modalSubtitle}>For payments made by cash, UPI, or any manual entry</Text>
+
+            {/* Payment Mode */}
+            <Text style={styles.modalLabel}>Payment Mode</Text>
+            <View style={styles.payModeRow}>
+              {['Cash', 'UPI', 'Card', 'Other'].map(mode => (
+                <TouchableOpacity
+                  key={mode}
+                  style={[styles.payModeChip, manualPayMode === mode && styles.payModeChipActive]}
+                  onPress={() => setManualPayMode(mode)}>
+                  <Text style={styles.payModeEmoji}>
+                    {mode === 'Cash' ? '💵' : mode === 'UPI' ? '📱' : mode === 'Card' ? '💳' : '🔄'}
+                  </Text>
+                  <Text style={[styles.payModeText, manualPayMode === mode && styles.payModeTextActive]}>{mode}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Description */}
+            <Text style={styles.modalLabel}>What did you pay for? *</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g. Kurkure, Auto ride, Chai..."
+              placeholderTextColor="#9CA3AF"
+              value={manualMerchant}
+              onChangeText={setManualMerchant}
+              autoFocus
+            />
+
+            {/* Amount */}
+            <Text style={styles.modalLabel}>Amount (₹) *</Text>
+            <TextInput
+              style={[styles.modalInput, styles.amountInput]}
+              placeholder="0"
+              placeholderTextColor="#9CA3AF"
+              value={manualAmount}
+              onChangeText={setManualAmount}
+              keyboardType="numeric"
+            />
+
+            {/* Buttons */}
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowManualEntry(false); setManualMerchant(''); setManualAmount(''); }}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleManualSave} style={styles.modalSaveContainer}>
+                <LinearGradient colors={['#7C3AED', '#4F46E5']} style={styles.modalSave}>
+                  <Text style={styles.modalSaveText}>Save</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A0A0F' },
-  header: { paddingBottom: 25 },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 55, paddingBottom: 20 },
-  greeting: { fontSize: 14, color: '#888', marginBottom: 4 },
-  headerTitle: { fontSize: 28, fontWeight: 'bold', color: 'white' },
-  dashboardIconBtn: { backgroundColor: '#1a1a2e', width: 45, height: 45, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FF6B6B30' },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  header: { backgroundColor: '#FFFFFF', paddingBottom: 20, paddingHorizontal: 20, paddingTop: 55, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 20 },
+  greeting: { fontSize: 14, color: '#9CA3AF', marginBottom: 4 },
+  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#7C3AED' },
+  dashboardIconBtn: { backgroundColor: '#F5F3FF', width: 45, height: 45, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#DDD6FE' },
   dashboardIcon: { fontSize: 22 },
   balanceCard: { marginHorizontal: 20, padding: 25, borderRadius: 24, elevation: 10 },
   balanceLabel: { fontSize: 13, color: 'rgba(255,255,255,0.7)' },
@@ -390,45 +495,74 @@ const styles = StyleSheet.create({
   categorizedCount: { fontSize: 12, color: 'rgba(255,255,255,0.7)' },
   monthPickerContainer: { marginTop: 15, marginBottom: 5 },
   monthPickerScroll: { paddingHorizontal: 16, gap: 8 },
-  monthChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: '#1a1a2e', borderWidth: 1, borderColor: '#ffffff10', alignItems: 'center', minWidth: 65 },
+  monthChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center', minWidth: 65 },
   monthChipSelected: { backgroundColor: '#7C3AED', borderColor: '#7C3AED' },
-  monthChipText: { fontSize: 14, fontWeight: 'bold', color: '#888' },
+  monthChipText: { fontSize: 14, fontWeight: 'bold', color: '#6B7280' },
   monthChipTextSelected: { color: 'white' },
-  monthChipYear: { fontSize: 10, color: '#555', marginTop: 1 },
-  monthChipYearSelected: { color: 'rgba(255,255,255,0.7)' },
-  listenIndicator: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginTop: 10, backgroundColor: '#1a1a2e', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#ffffff08' },
-  listenDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#555', marginRight: 8 },
-  listenDotActive: { backgroundColor: '#2ECC71' },
-  listenText: { flex: 1, fontSize: 12, color: '#888' },
+  monthChipYear: { fontSize: 10, color: '#9CA3AF', marginTop: 1 },
+  monthChipYearSelected: { color: 'rgba(255,255,255,0.8)' },
+  listenIndicator: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginTop: 10, backgroundColor: '#F0FDF4', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#BBF7D0' },
+  listenDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1D5DB', marginRight: 8 },
+  listenDotActive: { backgroundColor: '#22C55E' },
+  listenText: { flex: 1, fontSize: 12, color: '#15803D' },
   buttonsRow: { flexDirection: 'row', marginHorizontal: 20, marginTop: 12, gap: 10 },
   fetchButton: { flex: 1, borderRadius: 12, overflow: 'hidden' },
   fetchButtonGradient: { paddingVertical: 14, alignItems: 'center' },
   fetchButtonText: { color: 'white', fontSize: 14, fontWeight: 'bold' },
-  dashboardButton: { flex: 1, backgroundColor: '#1a1a2e', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#7C3AED50' },
+  dashboardButton: { flex: 1, backgroundColor: '#F5F3FF', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#DDD6FE' },
   dashboardButtonText: { color: '#7C3AED', fontSize: 14, fontWeight: 'bold' },
-  budgetButton: { flex: 1, backgroundColor: '#1a1a2e', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#FF6B6B50' },
-  budgetButtonText: { color: '#FF6B6B', fontSize: 14, fontWeight: 'bold' },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginHorizontal: 20, marginTop: 25, marginBottom: 12, color: 'white' },
-  emptyBox: { backgroundColor: '#1a1a2e', marginHorizontal: 20, padding: 40, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#7C3AED20' },
+  budgetButton: { flex: 1, backgroundColor: '#FFF1F2', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#FECDD3' },
+  budgetButtonText: { color: '#E11D48', fontSize: 14, fontWeight: 'bold' },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginHorizontal: 20, marginTop: 25, marginBottom: 12, color: '#1A1A1A' },
+  emptyBox: { backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 40, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
   emptyIcon: { fontSize: 40, marginBottom: 10 },
-  emptyText: { color: '#888', fontSize: 16, fontWeight: 'bold' },
-  emptySubText: { color: '#555', fontSize: 13, marginTop: 5, textAlign: 'center' },
-  transactionCard: { backgroundColor: '#1a1a2e', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ffffff08' },
+  emptyText: { color: '#6B7280', fontSize: 16, fontWeight: 'bold' },
+  emptySubText: { color: '#9CA3AF', fontSize: 13, marginTop: 5, textAlign: 'center' },
+  transactionCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
   categoryDot: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   categoryEmoji: { fontSize: 22 },
   transactionLeft: { flex: 1 },
-  merchantName: { fontSize: 15, fontWeight: 'bold', color: 'white' },
-  transactionDate: { fontSize: 12, color: '#555', marginTop: 2 },
+  merchantName: { fontSize: 15, fontWeight: 'bold', color: '#1A1A1A' },
+  transactionDate: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
   categoryBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 4, alignSelf: 'flex-start' },
   categoryBadgeText: { fontSize: 11 },
-  splitBadge: { backgroundColor: '#4ECDC420', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 4, alignSelf: 'flex-start' },
-  splitBadgeText: { fontSize: 11, color: '#4ECDC4', fontWeight: 'bold' },
+  splitBadge: { backgroundColor: '#ECFDF5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 4, alignSelf: 'flex-start' },
+  splitBadgeText: { fontSize: 11, color: '#059669', fontWeight: 'bold' },
   splitPreview: { marginTop: 4 },
-  splitPreviewItem: { fontSize: 11, color: '#666', marginTop: 1 },
-  splitPreviewMore: { fontSize: 10, color: '#555', fontStyle: 'italic', marginTop: 1 },
-  tapToAnnotate: { fontSize: 11, color: '#444', marginTop: 3, fontStyle: 'italic' },
-  notesPreview: { fontSize: 11, color: '#666', marginTop: 2, fontStyle: 'italic' },
+  splitPreviewItem: { fontSize: 11, color: '#6B7280', marginTop: 1 },
+  splitPreviewMore: { fontSize: 10, color: '#9CA3AF', fontStyle: 'italic', marginTop: 1 },
+  tapToAnnotate: { fontSize: 11, color: '#D1D5DB', marginTop: 3, fontStyle: 'italic' },
+  notesPreview: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontStyle: 'italic' },
   amountContainer: { alignItems: 'flex-end' },
-  transactionAmount: { fontSize: 16, fontWeight: 'bold', color: '#FF6B6B' },
-  arrow: { fontSize: 20, color: '#333', marginTop: 2 },
+  transactionAmount: { fontSize: 16, fontWeight: 'bold', color: '#EF4444' },
+  arrow: { fontSize: 20, color: '#D1D5DB', marginTop: 2 },
+
+  // Add Manual Transaction Button (inline)
+  addManualBtn: { marginHorizontal: 20, marginTop: 10, borderRadius: 14, overflow: 'hidden', elevation: 3, shadowColor: '#059669', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6 },
+  addManualGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
+  addManualIcon: { fontSize: 20, color: 'white', fontWeight: 'bold' },
+  addManualText: { color: 'white', fontSize: 14, fontWeight: 'bold' },
+
+  // Manual Entry Modal
+  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 36 },
+  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E5E7EB', alignSelf: 'center', marginBottom: 16 },
+  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A', textAlign: 'center' },
+  modalSubtitle: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginTop: 4, marginBottom: 20 },
+  modalLabel: { fontSize: 13, color: '#6B7280', fontWeight: '600', marginBottom: 8, marginTop: 12 },
+  modalInput: { backgroundColor: '#F9FAFB', color: '#1A1A1A', padding: 15, borderRadius: 14, fontSize: 16, borderWidth: 1, borderColor: '#E5E7EB' },
+  amountInput: { fontSize: 28, fontWeight: 'bold', textAlign: 'center', paddingVertical: 18 },
+  payModeRow: { flexDirection: 'row', gap: 8 },
+  payModeChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: '#F9FAFB', paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB' },
+  payModeChipActive: { backgroundColor: '#F5F3FF', borderColor: '#7C3AED', borderWidth: 1.5 },
+  payModeEmoji: { fontSize: 16 },
+  payModeText: { fontSize: 12, color: '#6B7280', fontWeight: '600' },
+  payModeTextActive: { color: '#7C3AED' },
+  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 24 },
+  modalCancel: { flex: 1, backgroundColor: '#F9FAFB', padding: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  modalCancelText: { color: '#6B7280', fontWeight: 'bold', fontSize: 15 },
+  modalSaveContainer: { flex: 2, borderRadius: 14, overflow: 'hidden', elevation: 4, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8 },
+  modalSave: { padding: 16, alignItems: 'center' },
+  modalSaveText: { color: 'white', fontWeight: 'bold', fontSize: 15 },
 });

@@ -40,18 +40,21 @@ export default function LoginScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0A0F" />
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      <LinearGradient colors={['#1a0533', '#0A0A0F']} style={styles.header}>
-        <View style={styles.logoCircle}>
+      {/* Hero Section */}
+      <View style={styles.hero}>
+        <LinearGradient colors={['#7C3AED', '#4F46E5']} style={styles.logoCircle}>
           <Text style={styles.logoEmoji}>💰</Text>
-        </View>
+        </LinearGradient>
         <Text style={styles.appName}>Spendly</Text>
         <Text style={styles.tagline}>Your Smart Expense Manager</Text>
-      </LinearGradient>
+      </View>
 
+      {/* Form */}
       <View style={styles.form}>
+        {/* Login / Sign Up Toggle */}
         <View style={styles.toggle}>
           <TouchableOpacity
             style={[styles.toggleBtn, isLogin && styles.toggleActive]}
@@ -74,7 +77,7 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             placeholder="Enter your email"
-            placeholderTextColor="#444"
+            placeholderTextColor="#9CA3AF"
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
@@ -87,7 +90,7 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             placeholder="Enter your password"
-            placeholderTextColor="#444"
+            placeholderTextColor="#9CA3AF"
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -120,30 +123,33 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A0A0F' },
-  header: {
-    paddingTop: 70,
-    paddingBottom: 40,
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  hero: {
     alignItems: 'center',
+    paddingTop: 70,
+    paddingBottom: 35,
+    backgroundColor: '#FFFFFF',
   },
   logoCircle: {
     width: 80,
     height: 80,
     borderRadius: 24,
-    backgroundColor: '#7C3AED20',
-    borderWidth: 1,
-    borderColor: '#7C3AED50',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 15,
+    elevation: 8,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
   logoEmoji: { fontSize: 40 },
-  appName: { fontSize: 30, fontWeight: 'bold', color: 'white' },
-  tagline: { fontSize: 14, color: '#555', marginTop: 5 },
+  appName: { fontSize: 32, fontWeight: 'bold', color: '#7C3AED' },
+  tagline: { fontSize: 14, color: '#9CA3AF', marginTop: 6 },
   form: { paddingHorizontal: 25, paddingTop: 10 },
   toggle: {
     flexDirection: 'row',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#F3F4F6',
     borderRadius: 14,
     padding: 4,
     marginBottom: 25,
@@ -154,28 +160,33 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
   },
-  toggleActive: { backgroundColor: '#7C3AED' },
-  toggleText: { color: '#555', fontWeight: 'bold', fontSize: 15 },
+  toggleActive: { backgroundColor: '#7C3AED', elevation: 2, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
+  toggleText: { color: '#9CA3AF', fontWeight: 'bold', fontSize: 15 },
   toggleTextActive: { color: 'white' },
-  welcomeText: { fontSize: 22, fontWeight: 'bold', color: 'white', marginBottom: 25 },
+  welcomeText: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 25 },
   inputContainer: { marginBottom: 18 },
-  inputLabel: { color: '#888', fontSize: 13, marginBottom: 8 },
+  inputLabel: { color: '#6B7280', fontSize: 13, marginBottom: 8, fontWeight: '600' },
   input: {
-    backgroundColor: '#1a1a2e',
-    color: 'white',
+    backgroundColor: '#F9FAFB',
+    color: '#1A1A1A',
     padding: 15,
     borderRadius: 12,
     fontSize: 15,
     borderWidth: 1,
-    borderColor: '#ffffff08',
+    borderColor: '#E5E7EB',
   },
   authButtonContainer: {
     borderRadius: 14,
     overflow: 'hidden',
     marginTop: 10,
+    elevation: 4,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
   authButton: { padding: 17, alignItems: 'center' },
   authButtonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  switchText: { color: '#555', textAlign: 'center', marginTop: 20, fontSize: 14 },
+  switchText: { color: '#9CA3AF', textAlign: 'center', marginTop: 20, fontSize: 14 },
   switchLink: { color: '#7C3AED', fontWeight: 'bold' },
 });

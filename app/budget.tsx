@@ -1,19 +1,22 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Notifications from 'expo-notifications';
+let Notifications: any = null;
+try { Notifications = require('expo-notifications'); } catch (e) { /* Expo Go SDK 53 */ }
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import { useTransactions } from '../context/TransactionContext';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+if (Notifications?.setNotificationHandler) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
 
 const CATEGORIES = [
   { name: 'Food', emoji: '🍕', color: '#FF6B6B' },
@@ -79,6 +82,8 @@ export default function BudgetScreen() {
   const { transactions, budgets, setBudgets } = useTransactions();
   const [editing, setEditing] = useState<string | null>(null);
   const [tempBudgets, setTempBudgets] = useState<{ [key: string]: string }>({});
+  const [showPredictions, setShowPredictions] = useState(false);
+  const [predictionsLoading, setPredictionsLoading] = useState(false);
 
   const monthOptions = generateMonthOptions();
   const [selectedMonth, setSelectedMonth] = useState(monthOptions[0].key);
@@ -90,6 +95,7 @@ export default function BudgetScreen() {
   }, []);
 
   const registerForNotifications = async () => {
+    if (!Notifications?.requestPermissionsAsync) return;
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Please allow notifications for budget alerts!');
@@ -97,6 +103,7 @@ export default function BudgetScreen() {
   };
 
   const sendNotification = async (title: string, body: string) => {
+    if (!Notifications?.scheduleNotificationAsync) return;
     await Notifications.scheduleNotificationAsync({
       content: { title, body, sound: true },
       trigger: null,
@@ -172,14 +179,14 @@ export default function BudgetScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0A0F" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      <LinearGradient colors={['#1a0533', '#0A0A0F']} style={styles.header}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Budget Alerts 🎯</Text>
-      </LinearGradient>
+      </View>
 
       {/* Month Picker */}
       <View style={styles.monthPickerContainer}>
@@ -272,7 +279,7 @@ export default function BudgetScreen() {
             <TextInput
               style={styles.budgetInput}
               placeholder="Enter monthly limit"
-              placeholderTextColor="#444"
+              placeholderTextColor="#9CA3AF"
               keyboardType="numeric"
               value={tempBudgets['_total'] || ''}
               onChangeText={(val) => setTempBudgets({ ...tempBudgets, ['_total']: val })}
@@ -284,11 +291,51 @@ export default function BudgetScreen() {
         )}
       </View>
 
-      {/* Predictions Section */}
-      {hasPredictions && (
+      {/* AI Prediction Toggle Button */}
+      <TouchableOpacity
+        style={[styles.predictionToggleBtn, showPredictions && styles.predictionToggleBtnActive]}
+        onPress={() => {
+          if (!showPredictions) {
+            setPredictionsLoading(true);
+            // Simulate AI thinking delay for effect
+            setTimeout(() => {
+              setPredictionsLoading(false);
+              setShowPredictions(true);
+            }, 1200);
+          } else {
+            setShowPredictions(false);
+          }
+        }}>
+        <LinearGradient
+          colors={showPredictions ? ['#4F46E5', '#7C3AED'] : ['#F5F3FF', '#EDE9FE']}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={styles.predictionToggleGradient}>
+          {predictionsLoading ? (
+            <View style={styles.predictionToggleContent}>
+              <ActivityIndicator size="small" color={showPredictions ? '#FFFFFF' : '#7C3AED'} />
+              <Text style={[styles.predictionToggleText, { color: '#7C3AED' }]}>🧠 AI is analyzing your spending...</Text>
+            </View>
+          ) : (
+            <View style={styles.predictionToggleContent}>
+              <Text style={styles.predictionToggleEmoji}>{showPredictions ? '🔮' : '🤖'}</Text>
+              <View>
+                <Text style={[styles.predictionToggleText, showPredictions && { color: '#FFFFFF' }]}>
+                  {showPredictions ? 'Hide AI Predictions' : 'Show AI Predictions'}
+                </Text>
+                <Text style={[styles.predictionToggleSub, showPredictions && { color: 'rgba(255,255,255,0.7)' }]}>
+                  {showPredictions ? 'Tap to collapse' : 'Tap to see smart spending advice'}
+                </Text>
+              </View>
+            </View>
+          )}
+        </LinearGradient>
+      </TouchableOpacity>
+
+      {/* Predictions Section — only shown when toggled */}
+      {showPredictions && hasPredictions && (
         <View style={styles.predictionsSection}>
           <View style={styles.predictionHeaderRow}>
-            <Text style={{ fontSize: 18, fontWeight: 'bold', color: 'white' }}>🔮 AI Predictions</Text>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1A1A1A' }}>🔮 AI Predictions</Text>
             <View style={styles.smartBadge}>
               <Text style={styles.smartBadgeText}>✨ Smart Advice</Text>
             </View>
@@ -353,6 +400,14 @@ export default function BudgetScreen() {
         </View>
       )}
 
+      {showPredictions && !hasPredictions && (
+        <View style={styles.noPredictionsBox}>
+          <Text style={styles.noPredictionsEmoji}>🤷</Text>
+          <Text style={styles.noPredictionsText}>No predictions yet</Text>
+          <Text style={styles.noPredictionsSub}>Set budgets and add transactions to see AI predictions</Text>
+        </View>
+      )}
+
       <Text style={styles.sectionTitle}>Set Category Budgets</Text>
 
       {CATEGORIES.map((cat) => {
@@ -393,7 +448,7 @@ export default function BudgetScreen() {
                 <TextInput
                   style={styles.budgetInput}
                   placeholder="Enter budget amount"
-                  placeholderTextColor="#444"
+                  placeholderTextColor="#9CA3AF"
                   keyboardType="numeric"
                   value={tempBudgets[cat.name] || ''}
                   onChangeText={(val) => setTempBudgets({ ...tempBudgets, [cat.name]: val })}
@@ -435,46 +490,23 @@ export default function BudgetScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A0A0F' },
-  header: {
-    padding: 20,
-    paddingTop: 55,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  header: { backgroundColor: '#FFFFFF', padding: 20, paddingTop: 55, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   backButton: { marginRight: 15 },
   backText: { color: '#7C3AED', fontSize: 16, fontWeight: 'bold' },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: 'white' },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A' },
 
   // Month Picker
   monthPickerContainer: { marginTop: 10, marginBottom: 15 },
   monthPickerScroll: { paddingHorizontal: 16, gap: 8 },
-  monthChip: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#1a1a2e',
-    borderWidth: 1,
-    borderColor: '#ffffff10',
-    alignItems: 'center',
-    minWidth: 65,
-  },
-  monthChipSelected: {
-    backgroundColor: '#7C3AED',
-    borderColor: '#7C3AED',
-  },
-  monthChipText: { fontSize: 14, fontWeight: 'bold', color: '#888' },
+  monthChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center', minWidth: 65 },
+  monthChipSelected: { backgroundColor: '#7C3AED', borderColor: '#7C3AED' },
+  monthChipText: { fontSize: 14, fontWeight: 'bold', color: '#6B7280' },
   monthChipTextSelected: { color: 'white' },
-  monthChipYear: { fontSize: 10, color: '#555', marginTop: 1 },
+  monthChipYear: { fontSize: 10, color: '#9CA3AF', marginTop: 1 },
   monthChipYearSelected: { color: 'rgba(255,255,255,0.7)' },
 
-  totalCard: {
-    marginHorizontal: 20,
-    padding: 22,
-    borderRadius: 24,
-    elevation: 10,
-    marginBottom: 5,
-  },
+  totalCard: { marginHorizontal: 20, padding: 22, borderRadius: 24, elevation: 10, marginBottom: 5 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel: { fontSize: 11, color: 'rgba(255,255,255,0.7)', textAlign: 'center' },
   totalAmount: { fontSize: 18, fontWeight: 'bold', color: 'white', textAlign: 'center', marginTop: 4 },
@@ -486,138 +518,59 @@ const styles = StyleSheet.create({
   overallProgressText: { color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 6, textAlign: 'center' },
 
   predictionsSection: { marginTop: 20 },
-  predictionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 20,
-    marginBottom: 12,
-    marginTop: 25,
-    gap: 10,
-  },
-  smartBadge: {
-    backgroundColor: '#7C3AED25',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#7C3AED50',
-  },
-  smartBadgeText: { color: '#A78BFA', fontSize: 11, fontWeight: 'bold' },
-  predictionCard: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    marginBottom: 10,
-    padding: 15,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
-  predictionCardDanger: {
-    backgroundColor: '#1a0a0a',
-    borderColor: '#FF6B6B30',
-  },
+  predictionHeaderRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginBottom: 12, marginTop: 25, gap: 10 },
+  smartBadge: { backgroundColor: '#7C3AED15', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE' },
+  smartBadgeText: { color: '#7C3AED', fontSize: 11, fontWeight: 'bold' },
+  predictionCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 16, flexDirection: 'row', alignItems: 'flex-start', borderWidth: 1, borderColor: '#F3F4F6', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
+  predictionCardDanger: { backgroundColor: '#FFF1F2', borderColor: '#FECDD3' },
   predictionEmoji: { fontSize: 28, marginRight: 12, marginTop: 2 },
   predictionText: { flex: 1 },
-  predictionTitle: { fontSize: 13, color: '#888', fontWeight: 'bold' },
-  predictionAmount: { fontSize: 15, fontWeight: 'bold', color: 'white', marginTop: 4 },
+  predictionTitle: { fontSize: 13, color: '#9CA3AF', fontWeight: 'bold' },
+  predictionAmount: { fontSize: 15, fontWeight: 'bold', color: '#1A1A1A', marginTop: 4 },
   predictionStatus: { fontSize: 13, fontWeight: 'bold', marginTop: 4 },
-  predictionWarning: { fontSize: 12, color: '#FF6B6B', marginTop: 4, fontWeight: 'bold' },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0A0A0F',
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 10,
-  },
+  predictionWarning: { fontSize: 12, color: '#EF4444', marginTop: 4, fontWeight: 'bold' },
+  statsRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 10, padding: 10, marginTop: 10 },
   statItem: { flex: 1, alignItems: 'center' },
-  statValue: { color: 'white', fontSize: 13, fontWeight: 'bold' },
-  statLabel: { color: '#555', fontSize: 9, marginTop: 2 },
-  statDivider: { width: 1, height: 24, backgroundColor: '#ffffff10' },
-  adviceBox: {
-    marginTop: 10,
-    padding: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
+  statValue: { color: '#1A1A1A', fontSize: 13, fontWeight: 'bold' },
+  statLabel: { color: '#9CA3AF', fontSize: 9, marginTop: 2 },
+  statDivider: { width: 1, height: 24, backgroundColor: '#E5E7EB' },
+  adviceBox: { marginTop: 10, padding: 10, borderRadius: 10, borderWidth: 1 },
   adviceText: { fontSize: 11, lineHeight: 16 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginHorizontal: 20,
-    marginTop: 25,
-    marginBottom: 12,
-    color: 'white',
-  },
-  budgetCard: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    marginBottom: 10,
-    padding: 15,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#ffffff08',
-  },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginHorizontal: 20, marginTop: 25, marginBottom: 12, color: '#1A1A1A' },
+  budgetCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 16, borderWidth: 1, borderColor: '#F3F4F6', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
   budgetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   budgetLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  categoryDot: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  categoryDot: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   categoryEmoji: { fontSize: 22 },
-  categoryName: { fontSize: 15, fontWeight: 'bold', color: 'white' },
-  spentText: { fontSize: 12, color: '#555', marginTop: 2 },
-  editButton: {
-    backgroundColor: '#7C3AED20',
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#7C3AED50',
-  },
+  categoryName: { fontSize: 15, fontWeight: 'bold', color: '#1A1A1A' },
+  spentText: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
+  editButton: { backgroundColor: '#F5F3FF', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE' },
   editButtonText: { color: '#7C3AED', fontSize: 13, fontWeight: 'bold' },
   inputRow: { flexDirection: 'row', marginTop: 12, gap: 10 },
-  budgetInput: {
-    flex: 1,
-    backgroundColor: '#0A0A0F',
-    color: 'white',
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#7C3AED50',
-    fontSize: 15,
-  },
-  saveBtn: {
-    backgroundColor: '#7C3AED',
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    justifyContent: 'center',
-  },
+  budgetInput: { flex: 1, backgroundColor: '#F9FAFB', color: '#1A1A1A', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', fontSize: 15 },
+  saveBtn: { backgroundColor: '#7C3AED', paddingHorizontal: 18, borderRadius: 10, justifyContent: 'center' },
   saveBtnText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
   progressContainer: { marginTop: 12 },
-  progressBar: {
-    height: 6,
-    backgroundColor: '#0A0A0F',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
+  progressBar: { height: 6, backgroundColor: '#F3F4F6', borderRadius: 3, overflow: 'hidden' },
   progressFill: { height: 6, borderRadius: 3 },
   progressLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
-  progressText: { fontSize: 11, color: '#555' },
-  budgetText: { fontSize: 11, color: '#555' },
-  alertBadge: {
-    backgroundColor: '#FF6B6B20',
-    padding: 6,
-    borderRadius: 8,
-    marginTop: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FF6B6B30',
-  },
-  alertText: { color: '#FF6B6B', fontSize: 12, fontWeight: 'bold' },
+  progressText: { fontSize: 11, color: '#9CA3AF' },
+  budgetText: { fontSize: 11, color: '#9CA3AF' },
+  alertBadge: { backgroundColor: '#FFF1F2', padding: 6, borderRadius: 8, marginTop: 8, alignItems: 'center', borderWidth: 1, borderColor: '#FECDD3' },
+  alertText: { color: '#EF4444', fontSize: 12, fontWeight: 'bold' },
+
+  // AI Prediction Toggle Button
+  predictionToggleBtn: { marginHorizontal: 20, marginTop: 20, borderRadius: 16, overflow: 'hidden', elevation: 3, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6 },
+  predictionToggleBtnActive: {},
+  predictionToggleGradient: { padding: 16 },
+  predictionToggleContent: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  predictionToggleEmoji: { fontSize: 28 },
+  predictionToggleText: { fontSize: 15, fontWeight: 'bold', color: '#7C3AED' },
+  predictionToggleSub: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
+
+  // No predictions fallback
+  noPredictionsBox: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginTop: 12, padding: 30, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  noPredictionsEmoji: { fontSize: 40, marginBottom: 8 },
+  noPredictionsText: { fontSize: 16, fontWeight: 'bold', color: '#6B7280' },
+  noPredictionsSub: { fontSize: 13, color: '#9CA3AF', marginTop: 4, textAlign: 'center' },
 });
