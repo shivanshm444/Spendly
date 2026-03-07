@@ -10,6 +10,12 @@ export type Split = {
   category: string;
 };
 
+export type ItemEntry = {
+  name: string;
+  qty: number;
+  price: number; // price per unit
+};
+
 export type Transaction = {
   amount: number;
   merchant: string;
@@ -19,6 +25,7 @@ export type Transaction = {
   subCategory?: string;
   notes: string;
   splits?: Split[];
+  items?: ItemEntry[];
 };
 
 type TransactionContextType = {

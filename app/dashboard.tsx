@@ -107,6 +107,10 @@ export default function DashboardScreen() {
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Dashboard</Text>
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity onPress={() => router.push('/calendar')} style={styles.calendarBtn}>
+          <Text style={styles.calendarBtnText}>📅</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Month Picker */}
@@ -230,7 +234,15 @@ export default function DashboardScreen() {
             const subTotals: { [key: string]: { amount: number; count: number } } = {};
             filteredTransactions.forEach(t => {
               if (t.category === category) {
-                if (t.splits && t.splits.length > 0) {
+                // Prefer item-level data
+                if (t.items && t.items.length > 0) {
+                  t.items.forEach(item => {
+                    const key = item.name;
+                    if (!subTotals[key]) subTotals[key] = { amount: 0, count: 0 };
+                    subTotals[key].amount += item.qty * item.price;
+                    subTotals[key].count += item.qty;
+                  });
+                } else if (t.splits && t.splits.length > 0) {
                   t.splits.forEach(s => {
                     if (s.category === category) {
                       const key = s.description || 'Other';
@@ -343,8 +355,15 @@ export default function DashboardScreen() {
         (() => {
           const productMap: { [key: string]: { amount: number; count: number; category: string; subCategory: string } } = {};
           filteredTransactions.forEach(t => {
-            // If transaction has splits, show each split item as a product
-            if (t.splits && t.splits.length > 0) {
+            // Prefer structured items data
+            if (t.items && t.items.length > 0) {
+              t.items.forEach(item => {
+                const key = item.name;
+                if (!productMap[key]) productMap[key] = { amount: 0, count: 0, category: t.category || '', subCategory: t.subCategory || '' };
+                productMap[key].amount += item.qty * item.price;
+                productMap[key].count += item.qty;
+              });
+            } else if (t.splits && t.splits.length > 0) {
               t.splits.forEach(s => {
                 const key = s.description || 'Unnamed item';
                 if (!productMap[key]) productMap[key] = { amount: 0, count: 0, category: s.category, subCategory: '' };
@@ -400,6 +419,8 @@ const styles = StyleSheet.create({
   backButton: { marginRight: 15 },
   backText: { color: '#7C3AED', fontSize: 16, fontWeight: 'bold' },
   headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A' },
+  calendarBtn: { width: 40, height: 40, borderRadius: 14, backgroundColor: '#F5F3FF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#DDD6FE' },
+  calendarBtnText: { fontSize: 20 },
 
   // Month Picker
   monthPickerContainer: { marginTop: 10, marginBottom: 5 },
