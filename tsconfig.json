@@ -5,6 +5,10 @@
     "jsx": "react-native",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
+    "lib": [
+      "esnext",
+      "dom"
+    ],
     "paths": {
       "@/*": [
         "./*"

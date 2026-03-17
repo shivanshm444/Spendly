@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, TextInput,
-  ScrollView, Alert, ActivityIndicator, StatusBar, Modal
+  ScrollView, Alert, ActivityIndicator, StatusBar, Modal, Image
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTransactions, Split, ItemEntry } from '../context/TransactionContext';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -61,10 +62,13 @@ const getGeminiSuggestion = async (
   try {
     const prompt = `You are a bank transaction categorizer for an Indian user. Given this bank SMS, classify it into exactly one category and one subcategory.\n\nCategories and their subcategories:\n- Food: Breakfast, Lunch, Dinner, Coffee/Tea\n- Snacks: Chips, Biscuits, Instant Noodles, Cold Drink, Namkeen\n- Dairy: Milk, Paneer, Curd, Ghee, Butter\n- Groceries: Vegetables, Fruits, Household\n- Shopping: Clothing, Electronics, Accessories, Online\n- Travel: Cab/Auto, Bus/Train, Flight, Hotel\n- Fuel: Petrol, Diesel, CNG\n- Entertainment: Movies, Streaming, Gaming, Events\n- Health: Medicine, Doctor, Gym\n- Rent: Rent, Maintenance, Electricity\n- Education: Books, Course, Fees, Stationery\n- Other: (use only if nothing else fits)\n\nMerchant: ${merchant}\nFull SMS: ${smsBody || 'not available'}\n\nRespond with ONLY a JSON object like {"category":"Food","subCategory":"Lunch"} — no other text.`;
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY.trim()}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY.trim()}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 50 } }) }
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.log('AI Categorize: API error', response.status);
+      return null;
+    }
     const data = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     if (!text) return null;
@@ -75,7 +79,7 @@ const getGeminiSuggestion = async (
       return { category: parsed.category, subCategory: parsed.subCategory || '' };
     }
     return null;
-  } catch (e) { return null; }
+  } catch (e) { console.log('AI Categorize error:', e); return null; }
 };
 
 const getAISuggestion = (merchant: string, smsBody: string = ''): { category: string; subCategory: string } => {
@@ -105,6 +109,141 @@ const getAISuggestion = (merchant: string, smsBody: string = ''): { category: st
   if (m.includes('recharge') || m.includes('jio') || m.includes('airtel') || m.includes('vodafone') || m.includes('postpaid') || m.includes('dth') || m.includes('tata sky'))
     return { category: 'Rent', subCategory: 'Other' };
   return { category: 'Other', subCategory: '' };
+};
+
+// ─── Receipt OCR via Gemini Vision ───────────────────────────────────────────
+
+const scanReceiptWithGemini = async (
+  base64Image: string
+): Promise<ItemEntry[] | null> => {
+  if (!GEMINI_API_KEY) {
+    console.log('Receipt OCR: No API key found');
+    return null;
+  }
+
+  const prompt = `You are a receipt/bill parser. Look at this receipt image carefully and extract every purchased item.
+
+Return ONLY a valid JSON array with this exact format, no markdown, no code fences, no extra text:
+[{"name":"Item Name","qty":1,"price":45.00}]
+
+Rules:
+- "price" should be the per-unit price in the receipt currency (NOT total for that line)
+- If quantity is not visible, assume 1
+- Do NOT include totals, subtotals, taxes, discounts, or service charges as items
+- Keep item names short and clean (e.g. "Maggi Noodles" not "MAGGI 2-MIN NOODLES 70G")
+- If you cannot read the receipt clearly, still try your best to extract what you can see
+- Return ONLY the JSON array, nothing else`;
+
+  // Try with gemini-2.0-flash first, fallback to gemini-2.0-flash-lite
+  const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+
+  for (let mi = 0; mi < models.length; mi++) {
+    const model = models[mi];
+    // If previous model was rate-limited, wait before retrying
+    if (mi > 0) {
+      console.log('Receipt OCR: Waiting 5s before trying next model...');
+      await new Promise(r => setTimeout(r, 5000));
+    }
+    try {
+      console.log(`Receipt OCR: Trying model ${model}...`);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY.trim()}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: 'image/jpeg',
+                  data: base64Image,
+                }
+              }
+            ]
+          }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.log(`Receipt OCR [${model}]: API error ${response.status}: ${errText.substring(0, 300)}`);
+        continue; // try next model
+      }
+
+      const data = await response.json();
+      console.log('Receipt OCR: API response received');
+
+      // Check for blocked content or empty candidates
+      if (data?.promptFeedback?.blockReason) {
+        console.log('Receipt OCR: Content blocked:', data.promptFeedback.blockReason);
+        continue;
+      }
+
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!text) {
+        console.log('Receipt OCR: Empty response text. Full response:', JSON.stringify(data).substring(0, 500));
+        continue;
+      }
+
+      console.log('Receipt OCR: Raw response:', text.substring(0, 300));
+
+      // Clean up: remove markdown code fences if present
+      let cleanText = text
+        .replace(/```json\s*/gi, '')
+        .replace(/```\s*/g, '')
+        .trim();
+
+      // Extract JSON array from response
+      const jsonMatch = cleanText.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+      if (!jsonMatch) {
+        console.log('Receipt OCR: Could not find JSON array in response');
+        // Try parsing the whole cleaned text as JSON
+        try {
+          const directParse = JSON.parse(cleanText);
+          if (Array.isArray(directParse) && directParse.length > 0) {
+            console.log('Receipt OCR: Direct parse succeeded');
+            return directParse
+              .filter((item: any) => item.name && typeof item.price === 'number' && item.price > 0)
+              .map((item: any) => ({
+                name: String(item.name).substring(0, 30),
+                qty: Math.max(1, Math.round(item.qty || 1)),
+                price: Math.round(item.price * 100) / 100,
+              }));
+          }
+        } catch { }
+        continue;
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        console.log('Receipt OCR: Parsed result is not a valid array');
+        continue;
+      }
+
+      console.log(`Receipt OCR: Successfully extracted ${parsed.length} items`);
+
+      // Validate and clean each item
+      const items = parsed
+        .filter((item: any) => item.name && typeof item.price === 'number' && item.price > 0)
+        .map((item: any) => ({
+          name: String(item.name).substring(0, 30),
+          qty: Math.max(1, Math.round(item.qty || 1)),
+          price: Math.round(item.price * 100) / 100,
+        }));
+
+      if (items.length > 0) return items;
+      console.log('Receipt OCR: All items filtered out during validation');
+
+    } catch (e) {
+      console.log(`Receipt OCR [${model}] error:`, e);
+    }
+  }
+
+  console.log('Receipt OCR: All models failed');
+  return null;
 };
 
 // ─── Price Memory Helpers ────────────────────────────────────────────────────
@@ -138,6 +277,8 @@ export default function AnnotationScreen() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [notes, setNotes] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [receiptScanning, setReceiptScanning] = useState(false);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
 
   // Cart: structured items
   const [cartItems, setCartItems] = useState<ItemEntry[]>([]);
@@ -215,6 +356,101 @@ export default function AnnotationScreen() {
     setActivePriceItem(null);
     setCartItems([]);
     setNotes('');
+  };
+
+  // ─── Receipt Scan Handler ──────────────────────────────────────────────────
+
+  const handleScanReceipt = async (useCamera: boolean) => {
+    try {
+      console.log('Receipt Scan: Starting...', useCamera ? 'Camera' : 'Gallery');
+      let result;
+      if (useCamera) {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        console.log('Receipt Scan: Camera permission:', status);
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Camera permission is required to scan receipts.');
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images'],
+          quality: 0.7,
+          base64: true,
+        });
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        console.log('Receipt Scan: Gallery permission:', status);
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Gallery permission is required to pick receipt photos.');
+          return;
+        }
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 0.7,
+          base64: true,
+        });
+      }
+
+      if (result.canceled) {
+        console.log('Receipt Scan: User cancelled');
+        return;
+      }
+      if (!result.assets?.[0]?.base64) {
+        console.log('Receipt Scan: No base64 data in result');
+        Alert.alert('Error', 'Could not get image data. Please try again.');
+        return;
+      }
+
+      console.log('Receipt Scan: Got image, base64 length:', result.assets[0].base64.length);
+      setReceiptScanning(true);
+      setReceiptPreview(result.assets[0].uri);
+
+      const items = await scanReceiptWithGemini(result.assets[0].base64);
+      console.log('Receipt Scan: Result:', items ? `${items.length} items` : 'null');
+
+      if (!items || items.length === 0) {
+        setReceiptScanning(false);
+        setReceiptPreview(null);
+        Alert.alert('😕 Could not read receipt', 'Try taking a clearer photo with good lighting, or add items manually.');
+        return;
+      }
+
+      // Auto-categorize: find the most common category among scanned items
+      const categoryCounts: Record<string, number> = {};
+      items.forEach(item => {
+        const suggestion = getAISuggestion(item.name);
+        const cat = suggestion.category;
+        categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+      });
+      const dominantCategory = Object.entries(categoryCounts)
+        .sort((a, b) => b[1] - a[1])[0]?.[0] || 'Other';
+
+      setSelectedCategory(dominantCategory);
+      setCartItems(items);
+      setReceiptScanning(false);
+
+      const totalScanned = items.reduce((sum, i) => sum + i.qty * i.price, 0);
+      Alert.alert(
+        '✅ Receipt Scanned!',
+        `Found ${items.length} items totalling ₹${totalScanned.toFixed(0)}.\nYou can edit items below.`
+      );
+    } catch (e) {
+      console.log('Scan receipt error:', e);
+      setReceiptScanning(false);
+      setReceiptPreview(null);
+      Alert.alert('Error', 'Something went wrong while scanning. Please try again.');
+    }
+  };
+
+  const showScanOptions = () => {
+    Alert.alert(
+      '📷 Scan Receipt',
+      'Choose how to capture your receipt',
+      [
+        { text: '📸 Camera', onPress: () => handleScanReceipt(true) },
+        { text: '🖼️ Gallery', onPress: () => handleScanReceipt(false) },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const handleItemTap = async (itemName: string) => {
@@ -306,9 +542,7 @@ export default function AnnotationScreen() {
     }
   };
 
-  const handleSave = async () => {
-    if (!selectedCategory) { Alert.alert('Please select a category!'); return; }
-
+  const performSave = async () => {
     const finalCategory = selectedCategory;
     const itemNames = cartItems.map(i => i.name);
     const finalSubCategory = itemNames.length > 0 ? itemNames.join(', ') : '';
@@ -352,6 +586,26 @@ export default function AnnotationScreen() {
       ? `Tagged as ${finalCategory} › ${itemNames.join(' + ')}`
       : `Tagged as ${finalCategory}`;
     Alert.alert('✅ Saved!', saveMsg, [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]);
+  };
+
+  const handleSave = async () => {
+    if (!selectedCategory) { Alert.alert('Please select a category!'); return; }
+
+    // If user has items in cart but cart total < transaction amount, warn about uncategorized amount
+    if (cartItems.length > 0 && cartTotal < totalAmount) {
+      const remaining = totalAmount - cartTotal;
+      Alert.alert(
+        '⚠️ Uncategorized Amount',
+        `₹${remaining.toFixed(0)} out of ₹${totalAmount.toFixed(0)} is not categorized yet.\n\n🛒 Cart total: ₹${cartTotal.toFixed(0)}\n💰 Transaction: ₹${totalAmount.toFixed(0)}\n❓ Remaining: ₹${remaining.toFixed(0)}`,
+        [
+          { text: 'Go Back & Add Items', style: 'cancel' },
+          { text: 'Save Anyway', style: 'destructive', onPress: () => performSave() }
+        ]
+      );
+      return;
+    }
+
+    performSave();
   };
 
   const handleDismiss = () => {
@@ -400,6 +654,33 @@ export default function AnnotationScreen() {
           </View>
         ) : null}
       </LinearGradient>
+
+      {/* ── Receipt Scan Button ──────────────────────────── */}
+      {receiptScanning ? (
+        <View style={styles.receiptScanningCard}>
+          {receiptPreview && (
+            <Image source={{ uri: receiptPreview }} style={styles.receiptPreviewImage} />
+          )}
+          <View style={styles.receiptScanningContent}>
+            <ActivityIndicator size="large" color="#7C3AED" />
+            <Text style={styles.receiptScanningTitle}>🧠 AI is reading your receipt...</Text>
+            <Text style={styles.receiptScanningHint}>Extracting items, prices & quantities</Text>
+          </View>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.scanReceiptBtn} onPress={showScanOptions}>
+          <Text style={styles.scanReceiptIcon}>📷</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.scanReceiptTitle}>Scan Receipt</Text>
+            <Text style={styles.scanReceiptHint}>
+              {cartItems.length > 0 && receiptPreview
+                ? `✅ ${cartItems.length} items scanned — tap to re-scan`
+                : 'Auto-fill items from receipt photo'}
+            </Text>
+          </View>
+          <Text style={styles.scanReceiptArrow}>→</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Friend Contribution Toggle */}
       <TouchableOpacity
@@ -638,6 +919,18 @@ const styles = StyleSheet.create({
   autoBadge: { backgroundColor: '#F5F3FF', marginHorizontal: 20, padding: 10, borderRadius: 12, marginBottom: 10, marginTop: 14, borderWidth: 1, borderColor: '#DDD6FE', alignItems: 'center' },
   autoBadgeText: { color: '#7C3AED', fontSize: 13, fontWeight: 'bold' },
   transactionCard: { marginHorizontal: 20, marginTop: 15, padding: 25, borderRadius: 24, alignItems: 'center', elevation: 10, marginBottom: 10 },
+
+  // Receipt scan
+  scanReceiptBtn: { marginHorizontal: 20, marginVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#DDD6FE', elevation: 2, gap: 12 },
+  scanReceiptIcon: { fontSize: 28 },
+  scanReceiptTitle: { fontSize: 14, fontWeight: 'bold', color: '#7C3AED' },
+  scanReceiptHint: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
+  scanReceiptArrow: { fontSize: 20, color: '#7C3AED', fontWeight: 'bold' },
+  receiptScanningCard: { marginHorizontal: 20, marginVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1.5, borderColor: '#DDD6FE', overflow: 'hidden', elevation: 3 },
+  receiptPreviewImage: { width: '100%', height: 120, resizeMode: 'cover' },
+  receiptScanningContent: { padding: 20, alignItems: 'center', gap: 10 },
+  receiptScanningTitle: { fontSize: 16, fontWeight: 'bold', color: '#7C3AED', marginTop: 4 },
+  receiptScanningHint: { fontSize: 12, color: '#9CA3AF' },
   merchantName: { fontSize: 24, fontWeight: 'bold', color: 'white' },
   amountText: { fontSize: 40, fontWeight: 'bold', color: 'white', marginTop: 8 },
   date: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 5 },
