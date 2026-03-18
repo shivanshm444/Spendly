@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import { useTransactions } from '../context/TransactionContext';
+import { Ionicons } from '@expo/vector-icons';
 
 if (Notifications?.setNotificationHandler) {
   Notifications.setNotificationHandler({
@@ -19,16 +20,16 @@ if (Notifications?.setNotificationHandler) {
 }
 
 const CATEGORIES = [
-  { name: 'Food', emoji: '🍕', color: '#FF6B6B' },
-  { name: 'Shopping', emoji: '🛒', color: '#4ECDC4' },
-  { name: 'Travel', emoji: '✈️', color: '#45B7D1' },
-  { name: 'Fuel', emoji: '⛽', color: '#F39C12' },
-  { name: 'Entertainment', emoji: '🎬', color: '#9B59B6' },
-  { name: 'Groceries', emoji: '🏪', color: '#2ECC71' },
-  { name: 'Health', emoji: '💊', color: '#E74C3C' },
-  { name: 'Rent', emoji: '🏠', color: '#3498DB' },
-  { name: 'Education', emoji: '📚', color: '#1ABC9C' },
-  { name: 'Other', emoji: '💳', color: '#95A5A6' },
+  { name: 'Food', icon: 'restaurant' as const, color: '#FF6B6B' },
+  { name: 'Shopping', icon: 'cart' as const, color: '#4ECDC4' },
+  { name: 'Travel', icon: 'airplane' as const, color: '#45B7D1' },
+  { name: 'Fuel', icon: 'car-sport' as const, color: '#F39C12' },
+  { name: 'Entertainment', icon: 'film' as const, color: '#9B59B6' },
+  { name: 'Groceries', icon: 'storefront' as const, color: '#2ECC71' },
+  { name: 'Health', icon: 'medkit' as const, color: '#E74C3C' },
+  { name: 'Rent', icon: 'home' as const, color: '#3498DB' },
+  { name: 'Education', icon: 'school' as const, color: '#1ABC9C' },
+  { name: 'Other', icon: 'wallet' as const, color: '#95A5A6' },
 ];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -179,14 +180,18 @@ export default function BudgetScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" />
 
-      <View style={styles.header}>
+      <LinearGradient colors={['#1E1B4B', '#312E81']} style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backText}>← Back</Text>
+          <Ionicons name="chevron-back" size={20} color="#C4B5FD" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Budget Alerts 🎯</Text>
-      </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>Budget Alerts</Text>
+          <Text style={styles.headerSub}>Track your spending limits</Text>
+        </View>
+        <Ionicons name="shield-checkmark" size={22} color="#C4B5FD" />
+      </LinearGradient>
 
       {/* Month Picker */}
       <View style={styles.monthPickerContainer}>
@@ -253,9 +258,9 @@ export default function BudgetScreen() {
       <View style={styles.budgetCard}>
         <View style={styles.budgetHeader}>
           <View style={styles.budgetLeft}>
-            <View style={[styles.categoryDot, { backgroundColor: '#7C3AED30' }]}>
-              <Text style={styles.categoryEmoji}>💰</Text>
-            </View>
+            <LinearGradient colors={['#7C3AED', '#6D28D9']} style={styles.categoryDot}>
+              <Ionicons name="wallet" size={18} color="#fff" />
+            </LinearGradient>
             <View>
               <Text style={styles.categoryName}>Overall Monthly Limit</Text>
               <Text style={styles.spentText}>
@@ -297,7 +302,6 @@ export default function BudgetScreen() {
         onPress={() => {
           if (!showPredictions) {
             setPredictionsLoading(true);
-            // Simulate AI thinking delay for effect
             setTimeout(() => {
               setPredictionsLoading(false);
               setShowPredictions(true);
@@ -313,11 +317,11 @@ export default function BudgetScreen() {
           {predictionsLoading ? (
             <View style={styles.predictionToggleContent}>
               <ActivityIndicator size="small" color={showPredictions ? '#FFFFFF' : '#7C3AED'} />
-              <Text style={[styles.predictionToggleText, { color: '#7C3AED' }]}>🧠 AI is analyzing your spending...</Text>
+              <Text style={[styles.predictionToggleText, { color: '#7C3AED' }]}>AI analyzing spending...</Text>
             </View>
           ) : (
             <View style={styles.predictionToggleContent}>
-              <Text style={styles.predictionToggleEmoji}>{showPredictions ? '🔮' : '🤖'}</Text>
+              <Ionicons name={showPredictions ? 'analytics' : 'sparkles'} size={24} color={showPredictions ? '#FFFFFF' : '#7C3AED'} />
               <View>
                 <Text style={[styles.predictionToggleText, showPredictions && { color: '#FFFFFF' }]}>
                   {showPredictions ? 'Hide AI Predictions' : 'Show AI Predictions'}
@@ -335,7 +339,8 @@ export default function BudgetScreen() {
       {showPredictions && hasPredictions && (
         <View style={styles.predictionsSection}>
           <View style={styles.predictionHeaderRow}>
-            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1A1A1A' }}>🔮 AI Predictions</Text>
+            <Ionicons name="analytics" size={20} color="#1E1B4B" />
+            <Text style={{ fontSize: 17, fontWeight: '700', color: '#1E1B4B', flex: 1 }}>AI Predictions</Text>
             <View style={styles.smartBadge}>
               <Text style={styles.smartBadgeText}>✨ Smart Advice</Text>
             </View>
@@ -349,7 +354,9 @@ export default function BudgetScreen() {
             const savings = Math.abs(prediction.overspend);
             return (
               <View key={cat.name} style={[styles.predictionCard, isOverspending && styles.predictionCardDanger]}>
-                <Text style={styles.predictionEmoji}>{cat.emoji}</Text>
+                <LinearGradient colors={[cat.color, cat.color + 'CC']} style={styles.predictionIconWrap}>
+                  <Ionicons name={cat.icon} size={18} color="#fff" />
+                </LinearGradient>
                 <View style={styles.predictionText}>
                   <Text style={styles.predictionTitle}>{cat.name} — End of Month</Text>
                   <Text style={styles.predictionAmount}>
@@ -408,7 +415,10 @@ export default function BudgetScreen() {
         </View>
       )}
 
-      <Text style={styles.sectionTitle}>Set Category Budgets</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginTop: 25, marginBottom: 12, gap: 8 }}>
+        <Ionicons name="wallet" size={18} color="#6D28D9" />
+        <Text style={styles.sectionTitle}>Set Category Budgets</Text>
+      </View>
 
       {CATEGORIES.map((cat) => {
         const spent = getCategorySpent(cat.name);
@@ -421,9 +431,9 @@ export default function BudgetScreen() {
           <View key={cat.name} style={styles.budgetCard}>
             <View style={styles.budgetHeader}>
               <View style={styles.budgetLeft}>
-                <View style={[styles.categoryDot, { backgroundColor: cat.color + '30' }]}>
-                  <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
-                </View>
+                <LinearGradient colors={[cat.color, cat.color + 'CC']} style={styles.categoryDot}>
+                  <Ionicons name={cat.icon} size={18} color="#fff" />
+                </LinearGradient>
                 <View>
                   <Text style={styles.categoryName}>{cat.name}</Text>
                   <Text style={styles.spentText}>
@@ -490,16 +500,16 @@ export default function BudgetScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  header: { backgroundColor: '#FFFFFF', padding: 20, paddingTop: 55, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  backButton: { marginRight: 15 },
-  backText: { color: '#7C3AED', fontSize: 16, fontWeight: 'bold' },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A' },
+  container: { flex: 1, backgroundColor: '#F8F7FF' },
+  header: { paddingTop: 52, paddingBottom: 20, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  backButton: { width: 38, height: 38, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  headerTitle: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
+  headerSub: { fontSize: 12, color: '#A5B4FC', fontWeight: '500', marginTop: 2 },
 
   // Month Picker
   monthPickerContainer: { marginTop: 10, marginBottom: 15 },
   monthPickerScroll: { paddingHorizontal: 16, gap: 8 },
-  monthChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center', minWidth: 65 },
+  monthChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#EDE9FE', alignItems: 'center', minWidth: 65 },
   monthChipSelected: { backgroundColor: '#7C3AED', borderColor: '#7C3AED' },
   monthChipText: { fontSize: 14, fontWeight: 'bold', color: '#6B7280' },
   monthChipTextSelected: { color: 'white' },
@@ -523,7 +533,7 @@ const styles = StyleSheet.create({
   smartBadgeText: { color: '#7C3AED', fontSize: 11, fontWeight: 'bold' },
   predictionCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 16, flexDirection: 'row', alignItems: 'flex-start', borderWidth: 1, borderColor: '#F3F4F6', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
   predictionCardDanger: { backgroundColor: '#FFF1F2', borderColor: '#FECDD3' },
-  predictionEmoji: { fontSize: 28, marginRight: 12, marginTop: 2 },
+  predictionIconWrap: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 12, marginTop: 2 },
   predictionText: { flex: 1 },
   predictionTitle: { fontSize: 13, color: '#9CA3AF', fontWeight: 'bold' },
   predictionAmount: { fontSize: 15, fontWeight: 'bold', color: '#1A1A1A', marginTop: 4 },
@@ -536,14 +546,13 @@ const styles = StyleSheet.create({
   statDivider: { width: 1, height: 24, backgroundColor: '#E5E7EB' },
   adviceBox: { marginTop: 10, padding: 10, borderRadius: 10, borderWidth: 1 },
   adviceText: { fontSize: 11, lineHeight: 16 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginHorizontal: 20, marginTop: 25, marginBottom: 12, color: '#1A1A1A' },
-  budgetCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 16, borderWidth: 1, borderColor: '#F3F4F6', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#1E1B4B' },
+  budgetCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 18, borderWidth: 1.5, borderColor: '#EDE9FE', elevation: 2, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 6 },
   budgetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   budgetLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  categoryDot: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  categoryEmoji: { fontSize: 22 },
-  categoryName: { fontSize: 15, fontWeight: 'bold', color: '#1A1A1A' },
-  spentText: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
+  categoryDot: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  categoryName: { fontSize: 15, fontWeight: '700', color: '#1E1B4B' },
+  spentText: { fontSize: 12, color: '#9CA3AF', marginTop: 2, fontWeight: '500' },
   editButton: { backgroundColor: '#F5F3FF', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE' },
   editButtonText: { color: '#7C3AED', fontSize: 13, fontWeight: 'bold' },
   inputRow: { flexDirection: 'row', marginTop: 12, gap: 10 },

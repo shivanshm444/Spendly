@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, StatusBar, Platform, AppState, Modal, TextInput, KeyboardAvoidingView } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, StatusBar, Platform, AppState, Modal, TextInput, KeyboardAvoidingView, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTransactions } from '../../context/TransactionContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { signOut } from 'firebase/auth';
 import { auth } from '../../firebase.config';
 import SmsAndroid from 'react-native-get-sms-android';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 const parseBankSMS = (message: string, date: string) => {
   const amountMatch = message.match(/Rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i) ||
@@ -25,35 +26,24 @@ const parseBankSMS = (message: string, date: string) => {
   return { amount, merchant, date, message, category: '', notes: '' };
 };
 
-const getCategoryColor = (category: string) => {
-  switch (category) {
-    case 'Food': return '#FF6B6B';
-    case 'Shopping': return '#4ECDC4';
-    case 'Entertainment': return '#9B59B6';
-    case 'Fuel': return '#F39C12';
-    case 'Groceries': return '#2ECC71';
-    case 'Travel': return '#45B7D1';
-    case 'Health': return '#E74C3C';
-    case 'Rent': return '#3498DB';
-    case 'Education': return '#1ABC9C';
-    default: return '#7C3AED';
-  }
+// ── Category Styling Map ──
+const CATEGORY_META: { [key: string]: { icon: string; iconSet: 'ion' | 'mci'; color: string; gradient: readonly [string, string] } } = {
+  Food:          { icon: 'restaurant',       iconSet: 'ion', color: '#FF6B6B', gradient: ['#FF6B6B', '#EE5A24'] },
+  Shopping:      { icon: 'cart',             iconSet: 'ion', color: '#4ECDC4', gradient: ['#4ECDC4', '#2AB7A9'] },
+  Entertainment: { icon: 'film',             iconSet: 'ion', color: '#9B59B6', gradient: ['#A855F7', '#7C3AED'] },
+  Fuel:          { icon: 'car-sport',        iconSet: 'ion', color: '#F39C12', gradient: ['#F39C12', '#E67E22'] },
+  Groceries:     { icon: 'storefront',       iconSet: 'ion', color: '#2ECC71', gradient: ['#2ECC71', '#27AE60'] },
+  Travel:        { icon: 'airplane',         iconSet: 'ion', color: '#45B7D1', gradient: ['#45B7D1', '#2980B9'] },
+  Health:        { icon: 'medkit',           iconSet: 'ion', color: '#E74C3C', gradient: ['#E74C3C', '#C0392B'] },
+  Rent:          { icon: 'home',             iconSet: 'ion', color: '#3498DB', gradient: ['#3498DB', '#2471A3'] },
+  Education:     { icon: 'school',           iconSet: 'ion', color: '#1ABC9C', gradient: ['#1ABC9C', '#16A085'] },
+  Snacks:        { icon: 'fast-food',        iconSet: 'ion', color: '#F97316', gradient: ['#F97316', '#EA580C'] },
+  Dairy:         { icon: 'water',            iconSet: 'ion', color: '#06B6D4', gradient: ['#06B6D4', '#0891B2'] },
+  Split:         { icon: 'cut',              iconSet: 'ion', color: '#10B981', gradient: ['#10B981', '#059669'] },
+  Other:         { icon: 'wallet',           iconSet: 'ion', color: '#7C3AED', gradient: ['#7C3AED', '#6D28D9'] },
 };
 
-const getCategoryEmoji = (category: string) => {
-  switch (category) {
-    case 'Food': return '🍕';
-    case 'Shopping': return '🛒';
-    case 'Entertainment': return '🎬';
-    case 'Fuel': return '⛽';
-    case 'Groceries': return '🏪';
-    case 'Travel': return '✈️';
-    case 'Health': return '💊';
-    case 'Rent': return '🏠';
-    case 'Education': return '📚';
-    default: return '💳';
-  }
-};
+const getCategoryMeta = (category: string) => CATEGORY_META[category] || CATEGORY_META['Other'];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -90,6 +80,20 @@ const mergeSmsWithExisting = (parsed: any[], existing: any[]): any[] => {
   return combined.sort((a, b) => parseInt(b.date) - parseInt(a.date));
 };
 
+// ── Pulse animation for live indicator ──
+const PulsingDot = () => {
+  const anim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  return <Animated.View style={[s.pulseDot, { opacity: anim }]} />;
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { transactions, setTransactions, setPendingTransaction, addTransaction, isLoaded } = useTransactions();
@@ -101,7 +105,6 @@ export default function HomeScreen() {
   const transactionsRef = useRef(transactions);
   const isLoadedRef = useRef(isLoaded);
 
-  // Manual entry state
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualMerchant, setManualMerchant] = useState('');
   const [manualAmount, setManualAmount] = useState('');
@@ -110,7 +113,6 @@ export default function HomeScreen() {
   useEffect(() => { transactionsRef.current = transactions; }, [transactions]);
   useEffect(() => { isLoadedRef.current = isLoaded; }, [isLoaded]);
 
-  // Seed known IDs from Firebase loaded transactions
   useEffect(() => {
     if (isLoaded && transactions.length > 0 && knownSmsIdsRef.current.size === 0) {
       transactions.forEach(t => {
@@ -128,6 +130,13 @@ export default function HomeScreen() {
     return !isNaN(tDate) && tDate >= currentMonthData.start && tDate <= currentMonthData.end;
   });
   const totalSpentMonth = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
+  const categorizedCount = filteredTransactions.filter(t => t.category && t.category !== '').length;
+
+  // Quick stats
+  const now = new Date();
+  const isCurrentMonth = currentMonthData.month === now.getMonth() && currentMonthData.year === now.getFullYear();
+  const daysElapsed = isCurrentMonth ? Math.max(now.getDate(), 1) : new Date(currentMonthData.year, currentMonthData.month + 1, 0).getDate();
+  const dailyAvg = daysElapsed > 0 ? totalSpentMonth / daysElapsed : 0;
 
   const fetchAndParseSms = useCallback((): Promise<any[]> => {
     return new Promise((resolve) => {
@@ -162,57 +171,32 @@ export default function HomeScreen() {
 
   const fetchAndDetectNew = useCallback(async (silent: boolean = true) => {
     if (!isLoadedRef.current) return;
-
     const parsed = await fetchAndParseSms();
     if (parsed.length === 0 && silent) return;
-
     const currentTransactions = transactionsRef.current;
-
-    // First fetch — seed known IDs, merge without triggering annotation
     if (!initialFetchDone.current) {
       initialFetchDone.current = true;
-      parsed.forEach(t => {
-        knownSmsIdsRef.current.add(getSmsId(t.date, t.amount, t.merchant));
-      });
+      parsed.forEach(t => { knownSmsIdsRef.current.add(getSmsId(t.date, t.amount, t.merchant)); });
       const merged = mergeSmsWithExisting(parsed, currentTransactions);
-      if (merged.length > currentTransactions.length) {
-        setTransactions([...merged]);
-      }
+      if (merged.length > currentTransactions.length) { setTransactions([...merged]); }
       setFetched(true);
       return;
     }
-
-    // Find truly new transactions
     const newTxns = parsed.filter(t => !knownSmsIdsRef.current.has(getSmsId(t.date, t.amount, t.merchant)));
-
-    // Add to known IDs
     parsed.forEach(t => knownSmsIdsRef.current.add(getSmsId(t.date, t.amount, t.merchant)));
-
-    // Only update if genuinely new
     if (newTxns.length > 0) {
       const merged = mergeSmsWithExisting(newTxns, currentTransactions);
       setTransactions([...merged]);
       setFetched(true);
-
       const newest = newTxns[0];
-      setPendingTransaction({
-        amount: newest.amount,
-        merchant: newest.merchant,
-        date: newest.date,
-        message: newest.message || '',
-        category: '',
-        notes: '',
-      });
+      setPendingTransaction({ amount: newest.amount, merchant: newest.merchant, date: newest.date, message: newest.message || '', category: '', notes: '' });
       router.push('/annotation');
     }
   }, [fetchAndParseSms, setTransactions, setPendingTransaction, router]);
 
   const manualFetch = useCallback(async () => {
     const parsed = await fetchAndParseSms();
-    if (parsed.length === 0) {
-      Alert.alert('No SMS', 'Could not read SMS. Make sure permissions are granted.');
-      return;
-    }
+    if (parsed.length === 0) { Alert.alert('No SMS', 'Could not read SMS. Make sure permissions are granted.'); return; }
     parsed.forEach(t => knownSmsIdsRef.current.add(getSmsId(t.date, t.amount, t.merchant)));
     const merged = mergeSmsWithExisting(parsed, transactionsRef.current);
     setTransactions([...merged]);
@@ -220,14 +204,12 @@ export default function HomeScreen() {
     Alert.alert('✅ Done!', `Found ${parsed.length} transactions`);
   }, [fetchAndParseSms, setTransactions]);
 
-  // Auto fetch after Firebase loads
   useEffect(() => {
     if (!isLoaded) return;
     const timer = setTimeout(() => { fetchAndDetectNew(true); }, 2000);
     return () => clearTimeout(timer);
   }, [isLoaded]);
 
-  // Poll every 5 seconds
   useEffect(() => {
     const startPolling = () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
@@ -241,9 +223,7 @@ export default function HomeScreen() {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
         fetchAndDetectNew(true);
         if (isLoadedRef.current) startPolling();
-      } else if (nextAppState.match(/inactive|background/)) {
-        stopPolling();
-      }
+      } else if (nextAppState.match(/inactive|background/)) { stopPolling(); }
       appState.current = nextAppState;
     });
     return () => { stopPolling(); subscription.remove(); };
@@ -258,155 +238,198 @@ export default function HomeScreen() {
 
   const handleManualSave = () => {
     const amt = parseFloat(manualAmount);
-    if (!manualMerchant.trim()) {
-      Alert.alert('Please enter a description');
-      return;
-    }
-    if (isNaN(amt) || amt <= 0) {
-      Alert.alert('Please enter a valid amount');
-      return;
-    }
-    const now = Date.now();
-    const newTxn = {
-      amount: amt,
-      merchant: manualMerchant.trim(),
-      date: String(now),
-      message: `Manual ${manualPayMode} payment: ${manualMerchant.trim()} ₹${amt}`,
-      category: '',
-      notes: '',
-    };
+    if (!manualMerchant.trim()) { Alert.alert('Please enter a description'); return; }
+    if (isNaN(amt) || amt <= 0) { Alert.alert('Please enter a valid amount'); return; }
+    const nowMs = Date.now();
+    const newTxn = { amount: amt, merchant: manualMerchant.trim(), date: String(nowMs), message: `Manual ${manualPayMode} payment: ${manualMerchant.trim()} ₹${amt}`, category: '', notes: '' };
     addTransaction(newTxn);
     setShowManualEntry(false);
     setManualMerchant('');
     setManualAmount('');
     setManualPayMode('Cash');
-    // Navigate to annotation for categorization
     setPendingTransaction(newTxn);
     router.push('/annotation');
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <ScrollView style={s.container} showsVerticalScrollIndicator={false}>
+      <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" />
 
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
+      {/* ── Premium Header ── */}
+      <LinearGradient colors={['#1E1B4B', '#312E81']} style={s.header}>
+        <View style={s.headerTop}>
           <View>
-            <Text style={styles.greeting}>Good day 👋</Text>
-            <Text style={styles.headerTitle}>Spendly</Text>
+            <Text style={s.greeting}>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'} 👋</Text>
+            <Text style={s.headerTitle}>Spendly</Text>
           </View>
-          <TouchableOpacity style={styles.dashboardIconBtn} onPress={() => router.push('/profile')}>
-            <Text style={styles.dashboardIcon}>👤</Text>
+          <TouchableOpacity onPress={() => router.push('/profile')} style={s.avatarBtn}>
+            <Ionicons name="person" size={20} color="#C4B5FD" />
           </TouchableOpacity>
         </View>
-        <LinearGradient colors={['#7C3AED', '#4F46E5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>Spent in {MONTHS[currentMonthData.month]} {currentMonthData.year}</Text>
-          <Text style={styles.balanceAmount}>₹{totalSpentMonth.toFixed(2)}</Text>
-          <View style={styles.balanceFooter}>
-            <Text style={styles.transactionCount}>📋 {filteredTransactions.length} transactions</Text>
-            <Text style={styles.categorizedCount}>📊 {transactions.length} total</Text>
-          </View>
-        </LinearGradient>
-      </View>
 
-      <View style={styles.monthPickerContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.monthPickerScroll}>
+        {/* Balance Card */}
+        <View style={s.balanceCard}>
+          <Text style={s.balanceLabel}>Spent in {MONTHS[currentMonthData.month]} {currentMonthData.year}</Text>
+          <Text style={s.balanceAmount}>₹{totalSpentMonth.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</Text>
+
+          {/* Quick Stats Row */}
+          <View style={s.statsRow}>
+            <View style={s.statBox}>
+              <View style={s.statIconWrap}>
+                <Ionicons name="trending-up" size={14} color="#A78BFA" />
+              </View>
+              <View>
+                <Text style={s.statValue}>₹{dailyAvg.toFixed(0)}</Text>
+                <Text style={s.statLabel}>Avg/day</Text>
+              </View>
+            </View>
+            <View style={s.statDivider} />
+            <View style={s.statBox}>
+              <View style={s.statIconWrap}>
+                <Ionicons name="receipt" size={14} color="#A78BFA" />
+              </View>
+              <View>
+                <Text style={s.statValue}>{filteredTransactions.length}</Text>
+                <Text style={s.statLabel}>Transactions</Text>
+              </View>
+            </View>
+            <View style={s.statDivider} />
+            <View style={s.statBox}>
+              <View style={s.statIconWrap}>
+                <Ionicons name="checkmark-circle" size={14} color="#A78BFA" />
+              </View>
+              <View>
+                <Text style={s.statValue}>{categorizedCount}</Text>
+                <Text style={s.statLabel}>Categorized</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      </LinearGradient>
+
+      {/* ── Month Picker ── */}
+      <View style={s.monthPickerWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.monthPickerScroll}>
           {monthOptions.map((m) => {
-            const isSelected = m.key === selectedMonth;
+            const isSel = m.key === selectedMonth;
             return (
-              <TouchableOpacity key={m.key} style={[styles.monthChip, isSelected && styles.monthChipSelected]} onPress={() => setSelectedMonth(m.key)}>
-                <Text style={[styles.monthChipText, isSelected && styles.monthChipTextSelected]}>{m.label}</Text>
-                <Text style={[styles.monthChipYear, isSelected && styles.monthChipYearSelected]}>{m.yearLabel}</Text>
+              <TouchableOpacity key={m.key} style={[s.monthChip, isSel && s.monthChipSel]} onPress={() => setSelectedMonth(m.key)}>
+                <Text style={[s.monthChipText, isSel && s.monthChipTextSel]}>{m.label}</Text>
+                <Text style={[s.monthChipYear, isSel && s.monthChipYearSel]}>{m.yearLabel}</Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       </View>
 
-      <View style={styles.listenIndicator}>
-        <View style={[styles.listenDot, styles.listenDotActive]} />
-        <Text style={styles.listenText}>🟢 Scanning every 5s — new transactions pop up automatically</Text>
+      {/* ── Live Scanning Indicator ── */}
+      <View style={s.liveBar}>
+        <PulsingDot />
+        <Text style={s.liveText}>Live scanning — new transactions appear automatically</Text>
       </View>
 
-      <View style={styles.buttonsRow}>
-        <TouchableOpacity style={styles.fetchButton} onPress={manualFetch}>
-          <LinearGradient colors={['#7C3AED', '#4F46E5']} style={styles.fetchButtonGradient}>
-            <Text style={styles.fetchButtonText}>🔄 Refresh</Text>
+      {/* ── Action Buttons ── */}
+      <View style={s.actionRow}>
+        <TouchableOpacity style={s.actionBtn} onPress={manualFetch}>
+          <LinearGradient colors={['#7C3AED', '#6D28D9']} style={s.actionGradient}>
+            <Ionicons name="refresh" size={18} color="#fff" />
+            <Text style={s.actionText}>Refresh</Text>
           </LinearGradient>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.dashboardButton} onPress={() => router.push('/dashboard')}>
-          <Text style={styles.dashboardButtonText}>📊 Dashboard</Text>
+        <TouchableOpacity style={s.actionBtn} onPress={() => router.push('/dashboard')}>
+          <View style={[s.actionOutlined, { borderColor: '#DDD6FE' }]}>
+            <Ionicons name="stats-chart" size={16} color="#7C3AED" />
+            <Text style={[s.actionOutlinedText, { color: '#7C3AED' }]}>Dashboard</Text>
+          </View>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.budgetButton} onPress={() => router.push('/budget')}>
-          <Text style={styles.budgetButtonText}>🎯 Budget</Text>
+        <TouchableOpacity style={s.actionBtn} onPress={() => router.push('/budget')}>
+          <View style={[s.actionOutlined, { borderColor: '#FECDD3' }]}>
+            <Ionicons name="shield-checkmark" size={16} color="#E11D48" />
+            <Text style={[s.actionOutlinedText, { color: '#E11D48' }]}>Budget</Text>
+          </View>
         </TouchableOpacity>
       </View>
 
-      {/* Add Manual Transaction Button */}
-      <TouchableOpacity style={styles.addManualBtn} onPress={() => setShowManualEntry(true)} activeOpacity={0.85}>
-        <LinearGradient colors={['#10B981', '#059669']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.addManualGradient}>
-          <Text style={styles.addManualIcon}>＋</Text>
-          <Text style={styles.addManualText}>Add Cash / Manual Transaction</Text>
-        </LinearGradient>
-      </TouchableOpacity>
+      {/* ── Quick Actions Row ── */}
+      <View style={s.quickActionsRow}>
+        <TouchableOpacity style={s.quickActionBtn} onPress={() => setShowManualEntry(true)} activeOpacity={0.85}>
+          <LinearGradient colors={['#10B981', '#059669']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.quickActionGrad}>
+            <View style={s.quickActionIconWrap}>
+              <Ionicons name="add-circle" size={24} color="#fff" />
+            </View>
+            <Text style={s.quickActionTitle}>Add Manual</Text>
+            <Text style={s.quickActionSub}>Cash / UPI</Text>
+          </LinearGradient>
+        </TouchableOpacity>
 
-      <Text style={styles.sectionTitle}>{MONTHS[currentMonthData.month]} {currentMonthData.year} Transactions</Text>
+        <TouchableOpacity style={s.quickActionBtn} onPress={() => router.push({ pathname: '/annotation', params: { scanReceipt: 'true' } })} activeOpacity={0.85}>
+          <LinearGradient colors={['#7C3AED', '#6D28D9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.quickActionGrad}>
+            <View style={s.quickActionIconWrap}>
+              <Ionicons name="scan" size={24} color="#fff" />
+            </View>
+            <Text style={s.quickActionTitle}>Scan Receipt</Text>
+            <Text style={s.quickActionSub}>Auto-fill items</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
 
+      {/* ── Section Title ── */}
+      <View style={s.sectionHeaderRow}>
+        <Ionicons name="list" size={18} color="#6D28D9" />
+        <Text style={s.sectionTitle}>{MONTHS[currentMonthData.month]} {currentMonthData.year} Transactions</Text>
+        <View style={s.countBadge}><Text style={s.countBadgeText}>{filteredTransactions.length}</Text></View>
+      </View>
+
+      {/* ── Transaction List ── */}
       {filteredTransactions.length === 0 ? (
-        <View style={styles.emptyBox}>
-          <Text style={styles.emptyIcon}>📭</Text>
-          <Text style={styles.emptyText}>No transactions for {MONTHS[currentMonthData.month]}</Text>
-          <Text style={styles.emptySubText}>Try selecting a different month above</Text>
+        <View style={s.emptyBox}>
+          <Ionicons name="mail-open-outline" size={48} color="#D1D5DB" />
+          <Text style={s.emptyText}>No transactions for {MONTHS[currentMonthData.month]}</Text>
+          <Text style={s.emptySubText}>Try selecting a different month above</Text>
         </View>
       ) : (
         filteredTransactions.map((t, index) => {
           const globalIndex = transactions.indexOf(t);
-          const catColor = getCategoryColor(t.category);
-          const catEmoji = getCategoryEmoji(t.category);
+          const meta = getCategoryMeta(t.category);
           return (
             <TouchableOpacity
               key={`${t.date}-${t.amount}-${index}`}
-              style={styles.transactionCard}
+              style={[s.txnCard, { borderLeftColor: t.category ? meta.color : '#E5E7EB' }]}
               onPress={() => router.push({
                 pathname: '/annotation',
-                params: {
-                  merchant: t.merchant,
-                  amount: String(t.amount),
-                  date: t.date,
-                  index: String(globalIndex),
-                  id: getSmsId(t.date, t.amount, t.merchant)
-                }
+                params: { merchant: t.merchant, amount: String(t.amount), date: t.date, index: String(globalIndex), id: getSmsId(t.date, t.amount, t.merchant) }
               })}>
-              <View style={[styles.categoryDot, { backgroundColor: catColor + '30' }]}>
-                <Text style={styles.categoryEmoji}>{catEmoji}</Text>
-              </View>
-              <View style={styles.transactionLeft}>
-                <Text style={styles.merchantName}>{t.merchant}</Text>
-                <Text style={styles.transactionDate}>{new Date(parseInt(t.date)).toLocaleDateString('en-IN')}</Text>
+              <LinearGradient colors={meta.gradient} style={s.txnIconBadge}>
+                <Ionicons name={meta.icon as any} size={18} color="#fff" />
+              </LinearGradient>
+              <View style={s.txnLeft}>
+                <Text style={s.txnMerchant} numberOfLines={1}>{t.merchant}</Text>
+                <Text style={s.txnDate}>{new Date(parseInt(t.date)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
                 {t.category === 'Split' && t.splits ? (
-                  <View style={styles.splitBadge}>
-                    <Text style={styles.splitBadgeText}>✂️ {t.splits.length} items split</Text>
+                  <View style={s.splitBadge}>
+                    <Ionicons name="cut" size={10} color="#059669" />
+                    <Text style={s.splitBadgeText}>{t.splits.length} items split</Text>
                   </View>
                 ) : t.category ? (
-                  <View style={[styles.categoryBadge, { backgroundColor: catColor + '20' }]}>
-                    <Text style={[styles.categoryBadgeText, { color: catColor }]}>🏷️ {t.category}{t.subCategory ? ` › ${t.subCategory}` : ''}</Text>
+                  <View style={[s.catBadge, { backgroundColor: meta.color + '15' }]}>
+                    <Text style={[s.catBadgeText, { color: meta.color }]}>{t.category}{t.subCategory ? ` › ${t.subCategory}` : ''}</Text>
                   </View>
                 ) : (
-                  <Text style={styles.tapToAnnotate}>Tap to categorize</Text>
+                  <Text style={s.tapLabel}>Tap to categorize</Text>
                 )}
                 {t.splits && t.splits.length > 0 && (
-                  <View style={styles.splitPreview}>
-                    {t.splits.slice(0, 2).map((s, i) => (
-                      <Text key={i} style={styles.splitPreviewItem}>₹{s.amount} — {s.description}</Text>
+                  <View style={s.splitPreview}>
+                    {t.splits.slice(0, 2).map((sp, i) => (
+                      <Text key={i} style={s.splitPreviewItem}>₹{sp.amount} — {sp.description}</Text>
                     ))}
-                    {t.splits.length > 2 && <Text style={styles.splitPreviewMore}>+{t.splits.length - 2} more...</Text>}
+                    {t.splits.length > 2 && <Text style={s.splitPreviewMore}>+{t.splits.length - 2} more…</Text>}
                   </View>
                 )}
-                {t.notes && !t.splits ? <Text style={styles.notesPreview}>📝 {t.notes}</Text> : null}
+                {t.notes && !t.splits ? <Text style={s.notesPreview}>📝 {t.notes}</Text> : null}
               </View>
-              <View style={styles.amountContainer}>
-                <Text style={styles.transactionAmount}>₹{t.amount.toFixed(0)}</Text>
-                <Text style={styles.arrow}>›</Text>
+              <View style={s.txnRight}>
+                <Text style={s.txnAmount}>₹{t.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</Text>
+                <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
               </View>
             </TouchableOpacity>
           );
@@ -414,61 +437,47 @@ export default function HomeScreen() {
       )}
       <View style={{ height: 40 }} />
 
-      {/* Manual Entry Modal */}
+      {/* ── Manual Entry Modal ── */}
       <Modal visible={showManualEntry} transparent animationType="slide">
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowManualEntry(false)} />
-          <View style={styles.modalCard}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>💸 Add Cash Transaction</Text>
-            <Text style={styles.modalSubtitle}>For payments made by cash, UPI, or any manual entry</Text>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalOverlay}>
+          <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={() => setShowManualEntry(false)} />
+          <View style={s.modalCard}>
+            <View style={s.modalHandle} />
+            <View style={s.modalHeaderRow}>
+              <Ionicons name="cash" size={24} color="#10B981" />
+              <Text style={s.modalTitle}>Add Transaction</Text>
+            </View>
+            <Text style={s.modalSubtitle}>For cash, UPI, or any manual payment</Text>
 
-            {/* Payment Mode */}
-            <Text style={styles.modalLabel}>Payment Mode</Text>
-            <View style={styles.payModeRow}>
-              {['Cash', 'UPI', 'Card', 'Other'].map(mode => (
-                <TouchableOpacity
-                  key={mode}
-                  style={[styles.payModeChip, manualPayMode === mode && styles.payModeChipActive]}
-                  onPress={() => setManualPayMode(mode)}>
-                  <Text style={styles.payModeEmoji}>
-                    {mode === 'Cash' ? '💵' : mode === 'UPI' ? '📱' : mode === 'Card' ? '💳' : '🔄'}
-                  </Text>
-                  <Text style={[styles.payModeText, manualPayMode === mode && styles.payModeTextActive]}>{mode}</Text>
+            <Text style={s.modalLabel}>Payment Mode</Text>
+            <View style={s.payModeRow}>
+              {([
+                { mode: 'Cash', icon: 'cash' as const },
+                { mode: 'UPI', icon: 'phone-portrait' as const },
+                { mode: 'Card', icon: 'card' as const },
+                { mode: 'Other', icon: 'swap-horizontal' as const },
+              ]).map(({ mode, icon }) => (
+                <TouchableOpacity key={mode} style={[s.payModeChip, manualPayMode === mode && s.payModeChipActive]} onPress={() => setManualPayMode(mode)}>
+                  <Ionicons name={icon} size={16} color={manualPayMode === mode ? '#7C3AED' : '#9CA3AF'} />
+                  <Text style={[s.payModeText, manualPayMode === mode && s.payModeTextActive]}>{mode}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Description */}
-            <Text style={styles.modalLabel}>What did you pay for? *</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="e.g. Kurkure, Auto ride, Chai..."
-              placeholderTextColor="#9CA3AF"
-              value={manualMerchant}
-              onChangeText={setManualMerchant}
-              autoFocus
-            />
+            <Text style={s.modalLabel}>What did you pay for?</Text>
+            <TextInput style={s.modalInput} placeholder="e.g. Kurkure, Auto ride, Chai…" placeholderTextColor="#9CA3AF" value={manualMerchant} onChangeText={setManualMerchant} autoFocus />
 
-            {/* Amount */}
-            <Text style={styles.modalLabel}>Amount (₹) *</Text>
-            <TextInput
-              style={[styles.modalInput, styles.amountInput]}
-              placeholder="0"
-              placeholderTextColor="#9CA3AF"
-              value={manualAmount}
-              onChangeText={setManualAmount}
-              keyboardType="numeric"
-            />
+            <Text style={s.modalLabel}>Amount (₹)</Text>
+            <TextInput style={[s.modalInput, s.amountInput]} placeholder="0" placeholderTextColor="#9CA3AF" value={manualAmount} onChangeText={setManualAmount} keyboardType="numeric" />
 
-            {/* Buttons */}
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowManualEntry(false); setManualMerchant(''); setManualAmount(''); }}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
+            <View style={s.modalButtons}>
+              <TouchableOpacity style={s.modalCancel} onPress={() => { setShowManualEntry(false); setManualMerchant(''); setManualAmount(''); }}>
+                <Text style={s.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleManualSave} style={styles.modalSaveContainer}>
-                <LinearGradient colors={['#7C3AED', '#4F46E5']} style={styles.modalSave}>
-                  <Text style={styles.modalSaveText}>Save</Text>
+              <TouchableOpacity onPress={handleManualSave} style={s.modalSaveWrap}>
+                <LinearGradient colors={['#7C3AED', '#6D28D9']} style={s.modalSave}>
+                  <Ionicons name="checkmark" size={18} color="#fff" />
+                  <Text style={s.modalSaveText}>Save</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -479,90 +488,110 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  header: { backgroundColor: '#FFFFFF', paddingBottom: 20, paddingHorizontal: 20, paddingTop: 55, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 20 },
-  greeting: { fontSize: 14, color: '#9CA3AF', marginBottom: 4 },
-  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#7C3AED' },
-  dashboardIconBtn: { backgroundColor: '#F5F3FF', width: 45, height: 45, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#DDD6FE' },
-  dashboardIcon: { fontSize: 22 },
-  balanceCard: { marginHorizontal: 20, padding: 25, borderRadius: 24, elevation: 10 },
-  balanceLabel: { fontSize: 13, color: 'rgba(255,255,255,0.7)' },
-  balanceAmount: { fontSize: 42, fontWeight: 'bold', color: 'white', marginTop: 5 },
-  balanceFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 },
-  transactionCount: { fontSize: 12, color: 'rgba(255,255,255,0.7)' },
-  categorizedCount: { fontSize: 12, color: 'rgba(255,255,255,0.7)' },
-  monthPickerContainer: { marginTop: 15, marginBottom: 5 },
+// ── Premium Styles ──
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F8F7FF' },
+
+  // Header
+  header: { paddingBottom: 24, paddingHorizontal: 20, paddingTop: 52 },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  greeting: { fontSize: 13, color: '#A5B4FC', letterSpacing: 0.5 },
+  headerTitle: { fontSize: 30, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
+  avatarBtn: { width: 42, height: 42, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+
+  // Balance Card
+  balanceCard: { backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  balanceLabel: { fontSize: 12, color: '#C4B5FD', fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase' },
+  balanceAmount: { fontSize: 44, fontWeight: '800', color: '#FFFFFF', marginTop: 4, letterSpacing: -1 },
+
+  // Stats Row
+  statsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 20, backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 16, padding: 12 },
+  statBox: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statIconWrap: { width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(167,139,250,0.15)', alignItems: 'center', justifyContent: 'center' },
+  statValue: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
+  statLabel: { fontSize: 10, color: '#A5B4FC', marginTop: 1 },
+  statDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.1)', marginHorizontal: 4 },
+
+  // Month Picker
+  monthPickerWrap: { marginTop: -1, backgroundColor: '#F8F7FF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 16 },
   monthPickerScroll: { paddingHorizontal: 16, gap: 8 },
-  monthChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center', minWidth: 65 },
-  monthChipSelected: { backgroundColor: '#7C3AED', borderColor: '#7C3AED' },
-  monthChipText: { fontSize: 14, fontWeight: 'bold', color: '#6B7280' },
-  monthChipTextSelected: { color: 'white' },
+  monthChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#EDE9FE', alignItems: 'center', minWidth: 65 },
+  monthChipSel: { backgroundColor: '#7C3AED', borderColor: '#7C3AED' },
+  monthChipText: { fontSize: 14, fontWeight: '700', color: '#6B7280' },
+  monthChipTextSel: { color: '#FFFFFF' },
   monthChipYear: { fontSize: 10, color: '#9CA3AF', marginTop: 1 },
-  monthChipYearSelected: { color: 'rgba(255,255,255,0.8)' },
-  listenIndicator: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginTop: 10, backgroundColor: '#F0FDF4', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#BBF7D0' },
-  listenDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1D5DB', marginRight: 8 },
-  listenDotActive: { backgroundColor: '#22C55E' },
-  listenText: { flex: 1, fontSize: 12, color: '#15803D' },
-  buttonsRow: { flexDirection: 'row', marginHorizontal: 20, marginTop: 12, gap: 10 },
-  fetchButton: { flex: 1, borderRadius: 12, overflow: 'hidden' },
-  fetchButtonGradient: { paddingVertical: 14, alignItems: 'center' },
-  fetchButtonText: { color: 'white', fontSize: 14, fontWeight: 'bold' },
-  dashboardButton: { flex: 1, backgroundColor: '#F5F3FF', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#DDD6FE' },
-  dashboardButtonText: { color: '#7C3AED', fontSize: 14, fontWeight: 'bold' },
-  budgetButton: { flex: 1, backgroundColor: '#FFF1F2', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#FECDD3' },
-  budgetButtonText: { color: '#E11D48', fontSize: 14, fontWeight: 'bold' },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginHorizontal: 20, marginTop: 25, marginBottom: 12, color: '#1A1A1A' },
-  emptyBox: { backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 40, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
-  emptyIcon: { fontSize: 40, marginBottom: 10 },
-  emptyText: { color: '#6B7280', fontSize: 16, fontWeight: 'bold' },
-  emptySubText: { color: '#9CA3AF', fontSize: 13, marginTop: 5, textAlign: 'center' },
-  transactionCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
-  categoryDot: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  categoryEmoji: { fontSize: 22 },
-  transactionLeft: { flex: 1 },
-  merchantName: { fontSize: 15, fontWeight: 'bold', color: '#1A1A1A' },
-  transactionDate: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
-  categoryBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 4, alignSelf: 'flex-start' },
-  categoryBadgeText: { fontSize: 11 },
-  splitBadge: { backgroundColor: '#ECFDF5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 4, alignSelf: 'flex-start' },
-  splitBadgeText: { fontSize: 11, color: '#059669', fontWeight: 'bold' },
+  monthChipYearSel: { color: 'rgba(255,255,255,0.7)' },
+
+  // Live Scanning
+  liveBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginTop: 12, backgroundColor: '#F0FDF4', padding: 12, borderRadius: 14, borderWidth: 1, borderColor: '#BBF7D0', gap: 10 },
+  pulseDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' },
+  liveText: { flex: 1, fontSize: 12, color: '#15803D', fontWeight: '500' },
+
+  // Action Buttons
+  actionRow: { flexDirection: 'row', marginHorizontal: 20, marginTop: 14, gap: 10 },
+  actionBtn: { flex: 1 },
+  actionGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 13, borderRadius: 14 },
+  actionText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  actionOutlined: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 13, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1.5 },
+  actionOutlinedText: { fontSize: 13, fontWeight: '700' },
+
+  // Quick Actions (Add Manual + Scan Receipt)
+  quickActionsRow: { flexDirection: 'row', marginHorizontal: 20, marginTop: 12, gap: 10 },
+  quickActionBtn: { flex: 1, borderRadius: 18, overflow: 'hidden', elevation: 4, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8 },
+  quickActionGrad: { alignItems: 'center', paddingVertical: 18, paddingHorizontal: 12, gap: 6 },
+  quickActionIconWrap: { width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  quickActionTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  quickActionSub: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '500' },
+
+  // Section Header
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginTop: 24, marginBottom: 14, gap: 8 },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#1E1B4B', flex: 1 },
+  countBadge: { backgroundColor: '#EDE9FE', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10 },
+  countBadgeText: { fontSize: 12, fontWeight: '700', color: '#7C3AED' },
+
+  // Empty
+  emptyBox: { backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 40, borderRadius: 24, alignItems: 'center', borderWidth: 1, borderColor: '#EDE9FE' },
+  emptyText: { color: '#6B7280', fontSize: 15, fontWeight: '600', marginTop: 12 },
+  emptySubText: { color: '#9CA3AF', fontSize: 13, marginTop: 4, textAlign: 'center' },
+
+  // Transaction Card
+  txnCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 14, borderRadius: 18, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#F3F4F6', borderLeftWidth: 4, elevation: 2, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 6 },
+  txnIconBadge: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  txnLeft: { flex: 1 },
+  txnMerchant: { fontSize: 15, fontWeight: '700', color: '#1E1B4B' },
+  txnDate: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontWeight: '500' },
+  catBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 5, alignSelf: 'flex-start' },
+  catBadgeText: { fontSize: 11, fontWeight: '600' },
+  splitBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ECFDF5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 5, alignSelf: 'flex-start' },
+  splitBadgeText: { fontSize: 11, color: '#059669', fontWeight: '600' },
   splitPreview: { marginTop: 4 },
   splitPreviewItem: { fontSize: 11, color: '#6B7280', marginTop: 1 },
   splitPreviewMore: { fontSize: 10, color: '#9CA3AF', fontStyle: 'italic', marginTop: 1 },
-  tapToAnnotate: { fontSize: 11, color: '#D1D5DB', marginTop: 3, fontStyle: 'italic' },
-  notesPreview: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontStyle: 'italic' },
-  amountContainer: { alignItems: 'flex-end' },
-  transactionAmount: { fontSize: 16, fontWeight: 'bold', color: '#EF4444' },
-  arrow: { fontSize: 20, color: '#D1D5DB', marginTop: 2 },
+  tapLabel: { fontSize: 11, color: '#C4B5FD', marginTop: 4, fontWeight: '500', fontStyle: 'italic' },
+  notesPreview: { fontSize: 11, color: '#9CA3AF', marginTop: 3, fontStyle: 'italic' },
+  txnRight: { alignItems: 'flex-end', gap: 4 },
+  txnAmount: { fontSize: 16, fontWeight: '800', color: '#EF4444' },
 
-  // Add Manual Transaction Button (inline)
-  addManualBtn: { marginHorizontal: 20, marginTop: 10, borderRadius: 14, overflow: 'hidden', elevation: 3, shadowColor: '#059669', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6 },
-  addManualGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
-  addManualIcon: { fontSize: 20, color: 'white', fontWeight: 'bold' },
-  addManualText: { color: 'white', fontSize: 14, fontWeight: 'bold' },
-
-  // Manual Entry Modal
+  // Modal
   modalOverlay: { flex: 1, justifyContent: 'flex-end' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
   modalCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 36 },
   modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E5E7EB', alignSelf: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A', textAlign: 'center' },
-  modalSubtitle: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginTop: 4, marginBottom: 20 },
-  modalLabel: { fontSize: 13, color: '#6B7280', fontWeight: '600', marginBottom: 8, marginTop: 12 },
-  modalInput: { backgroundColor: '#F9FAFB', color: '#1A1A1A', padding: 15, borderRadius: 14, fontSize: 16, borderWidth: 1, borderColor: '#E5E7EB' },
-  amountInput: { fontSize: 28, fontWeight: 'bold', textAlign: 'center', paddingVertical: 18 },
+  modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 4 },
+  modalTitle: { fontSize: 22, fontWeight: '800', color: '#1E1B4B' },
+  modalSubtitle: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginBottom: 20 },
+  modalLabel: { fontSize: 13, color: '#6B7280', fontWeight: '700', marginBottom: 8, marginTop: 14 },
+  modalInput: { backgroundColor: '#F9FAFB', color: '#1E1B4B', padding: 15, borderRadius: 14, fontSize: 16, borderWidth: 1.5, borderColor: '#EDE9FE' },
+  amountInput: { fontSize: 28, fontWeight: '800', textAlign: 'center', paddingVertical: 18 },
   payModeRow: { flexDirection: 'row', gap: 8 },
-  payModeChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: '#F9FAFB', paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB' },
-  payModeChipActive: { backgroundColor: '#F5F3FF', borderColor: '#7C3AED', borderWidth: 1.5 },
-  payModeEmoji: { fontSize: 16 },
+  payModeChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#F9FAFB', paddingVertical: 11, borderRadius: 14, borderWidth: 1.5, borderColor: '#E5E7EB' },
+  payModeChipActive: { backgroundColor: '#F5F3FF', borderColor: '#7C3AED' },
   payModeText: { fontSize: 12, color: '#6B7280', fontWeight: '600' },
   payModeTextActive: { color: '#7C3AED' },
   modalButtons: { flexDirection: 'row', gap: 12, marginTop: 24 },
-  modalCancel: { flex: 1, backgroundColor: '#F9FAFB', padding: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
-  modalCancelText: { color: '#6B7280', fontWeight: 'bold', fontSize: 15 },
-  modalSaveContainer: { flex: 2, borderRadius: 14, overflow: 'hidden', elevation: 4, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8 },
-  modalSave: { padding: 16, alignItems: 'center' },
-  modalSaveText: { color: 'white', fontWeight: 'bold', fontSize: 15 },
+  modalCancel: { flex: 1, backgroundColor: '#F9FAFB', padding: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1.5, borderColor: '#E5E7EB' },
+  modalCancelText: { color: '#6B7280', fontWeight: '700', fontSize: 15 },
+  modalSaveWrap: { flex: 2, borderRadius: 14, overflow: 'hidden', elevation: 4 },
+  modalSave: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16 },
+  modalSaveText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
 });

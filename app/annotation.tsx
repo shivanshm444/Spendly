@@ -4,9 +4,11 @@ import {
   ScrollView, Alert, ActivityIndicator, StatusBar, Modal, Image
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import TextRecognition from '@react-native-ml-kit/text-recognition';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTransactions, Split, ItemEntry } from '../context/TransactionContext';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 let Notifications: any = null;
 try { Notifications = require('expo-notifications'); } catch (e) { /* Expo Go SDK 53 */ }
@@ -111,139 +113,130 @@ const getAISuggestion = (merchant: string, smsBody: string = ''): { category: st
   return { category: 'Other', subCategory: '' };
 };
 
-// ─── Receipt OCR via Gemini Vision ───────────────────────────────────────────
+// ─── On-Device Receipt OCR via ML Kit ────────────────────────────────────────
 
-const scanReceiptWithGemini = async (
-  base64Image: string
+// Words that indicate a line is NOT an item (totals, headers, etc.)
+const SKIP_WORDS = [
+  'total', 'subtotal', 'sub total', 'grand total', 'net total',
+  'tax', 'gst', 'cgst', 'sgst', 'igst', 'vat', 'cess',
+  'discount', 'savings', 'you saved', 'cashback',
+  'change', 'cash', 'card', 'upi', 'payment', 'paid', 'balance',
+  'thank', 'visit', 'welcome', 'invoice', 'bill no', 'receipt',
+  'date', 'time', 'counter', 'cashier', 'customer', 'member',
+  'phone', 'tel', 'mobile', 'email', 'address', 'gstin', 'tin',
+  'round off', 'rounding', 'round', 'service charge', 'delivery',
+  'packaging', 'container', 'bag',
+];
+
+/**
+ * Parse raw OCR text from a receipt into structured items.
+ * Handles common Indian receipt formats.
+ */
+const parseReceiptText = (rawText: string): ItemEntry[] => {
+  const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+  const items: ItemEntry[] = [];
+
+  console.log('Receipt Parser: Processing', lines.length, 'lines');
+
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+
+    // Skip lines that match header/footer/total patterns
+    if (SKIP_WORDS.some(w => lower.includes(w))) continue;
+    // Skip lines that are just numbers or very short
+    if (/^[\d\s.,₹$%*=-]+$/.test(line)) continue;
+    if (line.length < 3) continue;
+
+    // Try to find a price in this line
+    // Patterns: ₹123, Rs.123, Rs 123, 123.00, MRP 123, just numbers at end
+    const priceMatch = line.match(
+      /(?:₹|rs\.?|mrp\.?|inr)?\s*(\d{1,6}(?:[.,]\d{1,2})?)\s*$/i
+    );
+
+    if (!priceMatch) continue;
+
+    const priceStr = priceMatch[1].replace(',', '.');
+    const price = parseFloat(priceStr);
+    if (isNaN(price) || price <= 0 || price > 100000) continue;
+
+    // Extract the item name (everything before the price)
+    let name = line
+      .substring(0, line.lastIndexOf(priceMatch[0]))
+      .replace(/[₹$*#]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Try to extract quantity: look for patterns like "2x", "x2", "2 X", "Qty: 2"
+    let qty = 1;
+    const qtyMatch = name.match(/(?:^|\s)(\d{1,3})\s*[xX×]\s*/)
+      || name.match(/\s*[xX×]\s*(\d{1,3})(?:\s|$)/)
+      || name.match(/qty[:\s]*(\d{1,3})/i);
+    if (qtyMatch) {
+      qty = parseInt(qtyMatch[1], 10) || 1;
+      name = name.replace(qtyMatch[0], ' ').trim();
+    }
+
+    // Also check for leading quantity like "2 Maggi Noodles"
+    const leadingQty = name.match(/^(\d{1,2})\s+([A-Za-z])/); 
+    if (leadingQty && parseInt(leadingQty[1]) <= 20) {
+      qty = parseInt(leadingQty[1], 10);
+      name = name.substring(leadingQty[1].length).trim();
+    }
+
+    // Clean up the name
+    name = name
+      .replace(/^[\-\s.,:;]+/, '')  // leading punctuation
+      .replace(/[\-\s.,:;]+$/, '')  // trailing punctuation
+      .replace(/\s{2,}/g, ' ')      // multiple spaces
+      .trim();
+
+    // Skip if name is too short or looks like a number
+    if (name.length < 2) continue;
+    if (/^\d+$/.test(name)) continue;
+
+    // Capitalize first letter of each word
+    name = name.replace(/\b\w/g, c => c.toUpperCase());
+    if (name.length > 30) name = name.substring(0, 30);
+
+    items.push({
+      name,
+      qty: Math.max(1, Math.min(qty, 99)),
+      price: Math.round(price * 100) / 100,
+    });
+  }
+
+  return items;
+};
+
+/**
+ * Scan a receipt using on-device ML Kit Text Recognition.
+ * No API key needed, works offline.
+ */
+const scanReceiptOnDevice = async (
+  imageUri: string
 ): Promise<ItemEntry[] | null> => {
-  if (!GEMINI_API_KEY) {
-    console.log('Receipt OCR: No API key found');
+  try {
+    console.log('Receipt OCR: Starting on-device text recognition...');
+    const result = await TextRecognition.recognize(imageUri);
+    
+    if (!result || !result.text) {
+      console.log('Receipt OCR: No text found in image');
+      return null;
+    }
+
+    console.log('Receipt OCR: Raw text length:', result.text.length);
+    console.log('Receipt OCR: Raw text preview:', result.text.substring(0, 300));
+
+    const items = parseReceiptText(result.text);
+    console.log('Receipt OCR: Parsed', items.length, 'items from text');
+
+    if (items.length === 0) return null;
+    return items;
+
+  } catch (e) {
+    console.log('Receipt OCR: On-device error:', e);
     return null;
   }
-
-  const prompt = `You are a receipt/bill parser. Look at this receipt image carefully and extract every purchased item.
-
-Return ONLY a valid JSON array with this exact format, no markdown, no code fences, no extra text:
-[{"name":"Item Name","qty":1,"price":45.00}]
-
-Rules:
-- "price" should be the per-unit price in the receipt currency (NOT total for that line)
-- If quantity is not visible, assume 1
-- Do NOT include totals, subtotals, taxes, discounts, or service charges as items
-- Keep item names short and clean (e.g. "Maggi Noodles" not "MAGGI 2-MIN NOODLES 70G")
-- If you cannot read the receipt clearly, still try your best to extract what you can see
-- Return ONLY the JSON array, nothing else`;
-
-  // Try with gemini-2.0-flash first, fallback to gemini-2.0-flash-lite
-  const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite'];
-
-  for (let mi = 0; mi < models.length; mi++) {
-    const model = models[mi];
-    // If previous model was rate-limited, wait before retrying
-    if (mi > 0) {
-      console.log('Receipt OCR: Waiting 5s before trying next model...');
-      await new Promise(r => setTimeout(r, 5000));
-    }
-    try {
-      console.log(`Receipt OCR: Trying model ${model}...`);
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY.trim()}`;
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: 'image/jpeg',
-                  data: base64Image,
-                }
-              }
-            ]
-          }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
-        })
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.log(`Receipt OCR [${model}]: API error ${response.status}: ${errText.substring(0, 300)}`);
-        continue; // try next model
-      }
-
-      const data = await response.json();
-      console.log('Receipt OCR: API response received');
-
-      // Check for blocked content or empty candidates
-      if (data?.promptFeedback?.blockReason) {
-        console.log('Receipt OCR: Content blocked:', data.promptFeedback.blockReason);
-        continue;
-      }
-
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (!text) {
-        console.log('Receipt OCR: Empty response text. Full response:', JSON.stringify(data).substring(0, 500));
-        continue;
-      }
-
-      console.log('Receipt OCR: Raw response:', text.substring(0, 300));
-
-      // Clean up: remove markdown code fences if present
-      let cleanText = text
-        .replace(/```json\s*/gi, '')
-        .replace(/```\s*/g, '')
-        .trim();
-
-      // Extract JSON array from response
-      const jsonMatch = cleanText.match(/\[\s*\{[\s\S]*?\}\s*\]/);
-      if (!jsonMatch) {
-        console.log('Receipt OCR: Could not find JSON array in response');
-        // Try parsing the whole cleaned text as JSON
-        try {
-          const directParse = JSON.parse(cleanText);
-          if (Array.isArray(directParse) && directParse.length > 0) {
-            console.log('Receipt OCR: Direct parse succeeded');
-            return directParse
-              .filter((item: any) => item.name && typeof item.price === 'number' && item.price > 0)
-              .map((item: any) => ({
-                name: String(item.name).substring(0, 30),
-                qty: Math.max(1, Math.round(item.qty || 1)),
-                price: Math.round(item.price * 100) / 100,
-              }));
-          }
-        } catch { }
-        continue;
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        console.log('Receipt OCR: Parsed result is not a valid array');
-        continue;
-      }
-
-      console.log(`Receipt OCR: Successfully extracted ${parsed.length} items`);
-
-      // Validate and clean each item
-      const items = parsed
-        .filter((item: any) => item.name && typeof item.price === 'number' && item.price > 0)
-        .map((item: any) => ({
-          name: String(item.name).substring(0, 30),
-          qty: Math.max(1, Math.round(item.qty || 1)),
-          price: Math.round(item.price * 100) / 100,
-        }));
-
-      if (items.length > 0) return items;
-      console.log('Receipt OCR: All items filtered out during validation');
-
-    } catch (e) {
-      console.log(`Receipt OCR [${model}] error:`, e);
-    }
-  }
-
-  console.log('Receipt OCR: All models failed');
-  return null;
 };
 
 // ─── Price Memory Helpers ────────────────────────────────────────────────────
@@ -332,6 +325,24 @@ export default function AnnotationScreen() {
     load();
   }, []);
 
+  // Auto-trigger receipt scan when navigated from home screen
+  useEffect(() => {
+    if (params.scanReceipt === 'true') {
+      const timer = setTimeout(() => {
+        Alert.alert(
+          'Scan Receipt',
+          'Choose how to capture your receipt',
+          [
+            { text: 'Camera', onPress: () => handleScanReceipt(true) },
+            { text: 'Gallery', onPress: () => handleScanReceipt(false) },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
   // AI classification
   useEffect(() => {
     setAiLoading(true);
@@ -373,8 +384,8 @@ export default function AnnotationScreen() {
         }
         result = await ImagePicker.launchCameraAsync({
           mediaTypes: ['images'],
-          quality: 0.7,
-          base64: true,
+          quality: 0.8,
+          base64: false, // ML Kit uses URI, not base64
         });
       } else {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -385,8 +396,8 @@ export default function AnnotationScreen() {
         }
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
-          quality: 0.7,
-          base64: true,
+          quality: 0.8,
+          base64: false, // ML Kit uses URI, not base64
         });
       }
 
@@ -394,17 +405,19 @@ export default function AnnotationScreen() {
         console.log('Receipt Scan: User cancelled');
         return;
       }
-      if (!result.assets?.[0]?.base64) {
-        console.log('Receipt Scan: No base64 data in result');
-        Alert.alert('Error', 'Could not get image data. Please try again.');
+      if (!result.assets?.[0]?.uri) {
+        console.log('Receipt Scan: No image URI in result');
+        Alert.alert('Error', 'Could not get image. Please try again.');
         return;
       }
 
-      console.log('Receipt Scan: Got image, base64 length:', result.assets[0].base64.length);
+      const imageUri = result.assets[0].uri;
+      console.log('Receipt Scan: Got image:', imageUri);
       setReceiptScanning(true);
-      setReceiptPreview(result.assets[0].uri);
+      setReceiptPreview(imageUri);
 
-      const items = await scanReceiptWithGemini(result.assets[0].base64);
+      // Use on-device ML Kit OCR (no API key needed)
+      const items = await scanReceiptOnDevice(imageUri);
       console.log('Receipt Scan: Result:', items ? `${items.length} items` : 'null');
 
       if (!items || items.length === 0) {
@@ -617,21 +630,19 @@ export default function AnnotationScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" />
 
       {/* Header */}
-      <View style={styles.header}>
+      <LinearGradient colors={['#1E1B4B', '#312E81']} style={styles.header}>
         <TouchableOpacity onPress={handleDismiss} style={styles.backButton}>
-          <Text style={styles.backText}>← Back</Text>
+          <Ionicons name="chevron-back" size={20} color="#C4B5FD" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{isFromPending ? '🔔 New Transaction!' : 'Categorize'}</Text>
-      </View>
-
-      {isFromPending && (
-        <View style={styles.autoBadge}>
-          <Text style={styles.autoBadgeText}>📲 Auto-detected from SMS</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>{isFromPending ? 'New Transaction!' : 'Categorize'}</Text>
+          <Text style={styles.headerSub}>{isFromPending ? 'Auto-detected from SMS' : 'Add details to your transaction'}</Text>
         </View>
-      )}
+        {isFromPending && <Ionicons name="notifications" size={20} color="#FBBF24" />}
+      </LinearGradient>
 
       {/* Transaction Card */}
       <LinearGradient colors={['#7C3AED', '#4F46E5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.transactionCard}>
@@ -646,11 +657,11 @@ export default function AnnotationScreen() {
         {aiLoading ? (
           <View style={styles.aiLoading}>
             <ActivityIndicator size="small" color="white" />
-            <Text style={styles.aiLoadingText}>🤖 AI is analyzing...</Text>
+            <Text style={styles.aiLoadingText}>AI is analyzing...</Text>
           </View>
         ) : selectedCategory ? (
           <View style={styles.aiSuggestion}>
-            <Text style={styles.aiSuggestionText}>🤖 AI suggested: {selectedCategory}</Text>
+            <Text style={styles.aiSuggestionText}>AI suggested: {selectedCategory}</Text>
           </View>
         ) : null}
       </LinearGradient>
@@ -663,13 +674,13 @@ export default function AnnotationScreen() {
           )}
           <View style={styles.receiptScanningContent}>
             <ActivityIndicator size="large" color="#7C3AED" />
-            <Text style={styles.receiptScanningTitle}>🧠 AI is reading your receipt...</Text>
+            <Text style={styles.receiptScanningTitle}>AI is reading your receipt...</Text>
             <Text style={styles.receiptScanningHint}>Extracting items, prices & quantities</Text>
           </View>
         </View>
       ) : (
         <TouchableOpacity style={styles.scanReceiptBtn} onPress={showScanOptions}>
-          <Text style={styles.scanReceiptIcon}>📷</Text>
+          <Ionicons name="camera" size={26} color="#7C3AED" />
           <View style={{ flex: 1 }}>
             <Text style={styles.scanReceiptTitle}>Scan Receipt</Text>
             <Text style={styles.scanReceiptHint}>
@@ -678,7 +689,7 @@ export default function AnnotationScreen() {
                 : 'Auto-fill items from receipt photo'}
             </Text>
           </View>
-          <Text style={styles.scanReceiptArrow}>→</Text>
+          <Ionicons name="chevron-forward" size={18} color="#7C3AED" />
         </TouchableOpacity>
       )}
 
@@ -686,7 +697,7 @@ export default function AnnotationScreen() {
       <TouchableOpacity
         style={[styles.contribToggleBtn, contributionEnabled && styles.contribToggleBtnActive]}
         onPress={() => setContributionEnabled(!contributionEnabled)}>
-        <Text style={styles.toggleBtnIcon}>🤝</Text>
+        <Ionicons name="people" size={22} color={contributionEnabled ? '#10B981' : '#9CA3AF'} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.toggleBtnText, contributionEnabled && styles.toggleBtnTextActiveGreen]}>Friend Contribution</Text>
           <Text style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{contributionEnabled ? 'Tap to remove' : 'Split cost with a friend'}</Text>
@@ -719,8 +730,11 @@ export default function AnnotationScreen() {
       )}
 
       {/* ── Category Selection ──────────────────────────────── */}
-      <Text style={styles.sectionTitle}>Where did you spend?</Text>
-      <Text style={styles.sectionHint}>🤖 AI will auto-categorize — tap to override</Text>
+      <View style={styles.sectionHeaderRow}>
+        <Ionicons name="grid" size={16} color="#6D28D9" />
+        <Text style={styles.sectionTitle}>Where did you spend?</Text>
+      </View>
+      <Text style={styles.sectionHint}>AI will auto-categorize — tap to override</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
         {allCategories.map((cat) => (
           <TouchableOpacity key={cat.name}
@@ -911,21 +925,20 @@ export default function AnnotationScreen() {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  header: { backgroundColor: '#FFFFFF', padding: 20, paddingTop: 55, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  backButton: { marginRight: 15 },
-  backText: { color: '#7C3AED', fontSize: 16, fontWeight: 'bold' },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#1A1A1A' },
+  container: { flex: 1, backgroundColor: '#F8F7FF' },
+  header: { paddingTop: 52, paddingBottom: 18, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  backButton: { width: 38, height: 38, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  headerTitle: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
+  headerSub: { fontSize: 12, color: '#A5B4FC', fontWeight: '500', marginTop: 2 },
   autoBadge: { backgroundColor: '#F5F3FF', marginHorizontal: 20, padding: 10, borderRadius: 12, marginBottom: 10, marginTop: 14, borderWidth: 1, borderColor: '#DDD6FE', alignItems: 'center' },
   autoBadgeText: { color: '#7C3AED', fontSize: 13, fontWeight: 'bold' },
   transactionCard: { marginHorizontal: 20, marginTop: 15, padding: 25, borderRadius: 24, alignItems: 'center', elevation: 10, marginBottom: 10 },
 
   // Receipt scan
-  scanReceiptBtn: { marginHorizontal: 20, marginVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#DDD6FE', elevation: 2, gap: 12 },
-  scanReceiptIcon: { fontSize: 28 },
-  scanReceiptTitle: { fontSize: 14, fontWeight: 'bold', color: '#7C3AED' },
-  scanReceiptHint: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
-  scanReceiptArrow: { fontSize: 20, color: '#7C3AED', fontWeight: 'bold' },
+  scanReceiptBtn: { marginHorizontal: 20, marginVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#EDE9FE', elevation: 2, gap: 12 },
+  scanReceiptTitle: { fontSize: 14, fontWeight: '700', color: '#7C3AED' },
+  scanReceiptHint: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontWeight: '500' },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginTop: 20, marginBottom: 4, gap: 8 },
   receiptScanningCard: { marginHorizontal: 20, marginVertical: 10, backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1.5, borderColor: '#DDD6FE', overflow: 'hidden', elevation: 3 },
   receiptPreviewImage: { width: '100%', height: 120, resizeMode: 'cover' },
   receiptScanningContent: { padding: 20, alignItems: 'center', gap: 10 },
