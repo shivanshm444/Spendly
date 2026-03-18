@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "76596635447",
+    "project_id": "banktracker-3b12a",
+    "storage_bucket": "banktracker-3b12a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:76596635447:android:b85e92348392a373a59cb2",
+        "android_client_info": {
+          "package_name": "com.banktracker.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB96rCeB2_8QRTtDLSN5sCwQUKiqwGHylE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
