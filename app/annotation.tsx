@@ -117,20 +117,30 @@ const getAISuggestion = (merchant: string, smsBody: string = ''): { category: st
 
 // Words that indicate a line is NOT an item (totals, headers, etc.)
 const SKIP_WORDS = [
-  'total', 'subtotal', 'sub total', 'grand total', 'net total',
+  'total', 'subtotal', 'sub total', 'grand total', 'net total', 'net amount',
+  'gross amt', 'gross amount', 'net amt',
   'tax', 'gst', 'cgst', 'sgst', 'igst', 'vat', 'cess',
-  'discount', 'savings', 'you saved', 'cashback',
-  'change', 'cash', 'card', 'upi', 'payment', 'paid', 'balance',
+  'discount', 'savings', 'you saved', 'cashback', 'saved',
+  'change', 'cash tendered', 'card', 'upi', 'payment', 'paid', 'balance',
   'thank', 'visit', 'welcome', 'invoice', 'bill no', 'receipt',
   'date', 'time', 'counter', 'cashier', 'customer', 'member',
-  'phone', 'tel', 'mobile', 'email', 'address', 'gstin', 'tin',
+  'phone', 'tel', 'mobile', 'email', 'address', 'gstin', 'tin:',
   'round off', 'rounding', 'round', 'service charge', 'delivery',
   'packaging', 'container', 'bag',
+  'store no', 'store id', 'branch', 'outlet',
+  'c-mem', 'mem no', 'member no', 'loyalty',
+  'item descrip', 'item description', 'description', 'particulars',
+  'qty', 'rate', 'amount', 'mrp', 'price',
+  'computer generated', 'copy', 'original',
+  'avenues', 'supermarts', 'ltd', 'pvt',
+  'total items', 'no of items', 'items:',
+  'cash memo', 'tax invoice', 'retail',
 ];
 
 /**
  * Parse raw OCR text from a receipt into structured items.
- * Handles common Indian receipt formats.
+ * Handles common Indian tabular receipt formats (D-MART, BigBazaar, etc.)
+ * Format: "ITEM_NAME  QTY  RATE  AMOUNT" or "SL. ITEM_NAME QTY RATE AMOUNT"
  */
 const parseReceiptText = (rawText: string): ItemEntry[] => {
   const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 2);
@@ -143,60 +153,95 @@ const parseReceiptText = (rawText: string): ItemEntry[] => {
 
     // Skip lines that match header/footer/total patterns
     if (SKIP_WORDS.some(w => lower.includes(w))) continue;
-    // Skip lines that are just numbers or very short
-    if (/^[\d\s.,₹$%*=-]+$/.test(line)) continue;
+    // Skip lines that are just numbers, symbols, or dashes
+    if (/^[\d\s.,₹$%*=\-\/\\:;]+$/.test(line)) continue;
     if (line.length < 3) continue;
+    // Skip date/time lines like "17/03/2026 19:42"
+    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(line)) continue;
+    // Skip lines that are all uppercase headers without numbers (like "D-MART", "KORAMANGALA, BANGALORE")
+    if (/^[A-Z\s,.\-]+$/.test(line) && !/\d/.test(line)) continue;
+    // Skip lines that are just a location/address
+    if (/^\w+,\s*\w+$/.test(line)) continue;
 
-    // Try to find a price in this line
-    // Patterns: ₹123, Rs.123, Rs 123, 123.00, MRP 123, just numbers at end
-    const priceMatch = line.match(
-      /(?:₹|rs\.?|mrp\.?|inr)?\s*(\d{1,6}(?:[.,]\d{1,2})?)\s*$/i
-    );
+    // Find ALL numbers in this line (to handle tabular formats)
+    const allNumbers = [...line.matchAll(/(\d+(?:[.,]\d{1,2})?)/g)].map(m => ({
+      value: parseFloat(m[1].replace(',', '.')),
+      index: m.index!,
+      raw: m[0],
+    }));
 
-    if (!priceMatch) continue;
+    // Need at least one number that looks like a price
+    if (allNumbers.length === 0) continue;
 
-    const priceStr = priceMatch[1].replace(',', '.');
-    const price = parseFloat(priceStr);
-    if (isNaN(price) || price <= 0 || price > 100000) continue;
+    // For tabular receipts (QTY RATE AMOUNT), the LAST number is typically the total amount
+    // Pick the last number as the price (it's the line total in tabular formats)
+    const lastNum = allNumbers[allNumbers.length - 1];
+    const price = lastNum.value;
+    
+    // Skip unreasonable prices
+    if (isNaN(price) || price < 5 || price > 100000) continue;
 
-    // Extract the item name (everything before the price)
-    let name = line
-      .substring(0, line.lastIndexOf(priceMatch[0]))
-      .replace(/[₹$*#]+/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    // Try to extract quantity: look for patterns like "2x", "x2", "2 X", "Qty: 2"
+    // Extract quantity: in tabular receipts, it's usually the first standalone number
     let qty = 1;
-    const qtyMatch = name.match(/(?:^|\s)(\d{1,3})\s*[xX×]\s*/)
-      || name.match(/\s*[xX×]\s*(\d{1,3})(?:\s|$)/)
-      || name.match(/qty[:\s]*(\d{1,3})/i);
-    if (qtyMatch) {
-      qty = parseInt(qtyMatch[1], 10) || 1;
-      name = name.replace(qtyMatch[0], ' ').trim();
+    if (allNumbers.length >= 3) {
+      // Tabular format: NAME QTY RATE AMOUNT
+      // First number after the name text is usually qty
+      // Find the first number that is small (1-99) and stands alone
+      for (let i = 0; i < allNumbers.length - 1; i++) {
+        const n = allNumbers[i];
+        if (n.value >= 1 && n.value <= 99 && Number.isInteger(n.value)) {
+          // Check this isn't part of the item name (like "500G")
+          const charBefore = line[n.index - 1] || ' ';
+          const charAfter = line[n.index + n.raw.length] || ' ';
+          if (/\s/.test(charBefore) && /[\s.]/.test(charAfter)) {
+            qty = n.value;
+            break;
+          }
+        }
+      }
     }
 
-    // Also check for leading quantity like "2 Maggi Noodles"
-    const leadingQty = name.match(/^(\d{1,2})\s+([A-Za-z])/); 
-    if (leadingQty && parseInt(leadingQty[1]) <= 20) {
-      qty = parseInt(leadingQty[1], 10);
-      name = name.substring(leadingQty[1].length).trim();
+    // Extract item name: everything before the first number that looks like qty/rate/amount
+    // Find where the numeric columns start
+    let nameEndIndex = line.length;
+    for (let i = 0; i < allNumbers.length; i++) {
+      const n = allNumbers[i];
+      // Check if this number is preceded by whitespace (start of numeric columns)
+      const textBefore = line.substring(0, n.index).trim();
+      if (textBefore.length >= 3 && /[A-Za-z]/.test(textBefore)) {
+        // Check if there's a clear gap before this number (tabular column separator)
+        const charBefore = line[n.index - 1] || '';
+        const twoCharBefore = line.substring(Math.max(0, n.index - 2), n.index);
+        if (/\s{2}/.test(twoCharBefore) || /\s/.test(charBefore)) {
+          nameEndIndex = n.index;
+          break;
+        }
+      }
     }
 
-    // Clean up the name
+    let name = line.substring(0, nameEndIndex).trim();
+
+    // Remove serial number prefix like "1.", "2.", "3."
+    name = name.replace(/^\d{1,2}\.\s*/, '');
+
+    // Remove any remaining numbers that are part of product specs but keep sizes like "500G", "2L"
+    // Clean up
     name = name
-      .replace(/^[\-\s.,:;]+/, '')  // leading punctuation
-      .replace(/[\-\s.,:;]+$/, '')  // trailing punctuation
-      .replace(/\s{2,}/g, ' ')      // multiple spaces
+      .replace(/[₹$*#]+/g, '')
+      .replace(/^[\-\s.,:;]+/, '')
+      .replace(/[\-\s.,:;]+$/, '')
+      .replace(/\s{2,}/g, ' ')
       .trim();
 
     // Skip if name is too short or looks like a number
     if (name.length < 2) continue;
     if (/^\d+$/.test(name)) continue;
+    // Must contain at least one letter
+    if (!/[A-Za-z]/.test(name)) continue;
 
     // Capitalize first letter of each word
     name = name.replace(/\b\w/g, c => c.toUpperCase());
-    if (name.length > 30) name = name.substring(0, 30);
+    if (name.length > 35) name = name.substring(0, 35);
 
     items.push({
       name,

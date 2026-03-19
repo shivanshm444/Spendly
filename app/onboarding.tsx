@@ -2,27 +2,31 @@ import { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, Dimensions, StatusBar } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 const SLIDES = [
   {
-    emoji: '📱',
+    icon: 'chatbubbles' as const,
     title: 'Smart SMS Detection',
     desc: 'Spendly automatically reads your bank SMS messages and extracts transaction details instantly.',
-    accent: '#7C3AED',
+    gradient: ['#7C3AED', '#6D28D9'] as [string, string],
+    iconBg: '#A78BFA',
   },
   {
-    emoji: '🤖',
+    icon: 'sparkles' as const,
     title: 'AI Categorization',
     desc: 'Our AI automatically categorizes your spending into Food, Shopping, Travel and more — saving you time!',
-    accent: '#4F46E5',
+    gradient: ['#4F46E5', '#4338CA'] as [string, string],
+    iconBg: '#818CF8',
   },
   {
-    emoji: '📊',
+    icon: 'bar-chart' as const,
     title: 'Smart Insights',
     desc: 'Get spending insights, budget alerts and discover your spending personality with beautiful charts.',
-    accent: '#059669',
+    gradient: ['#059669', '#047857'] as [string, string],
+    iconBg: '#34D399',
   },
 ];
 
@@ -45,123 +49,193 @@ export default function OnboardingScreen() {
   const slide = SLIDES[currentSlide];
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <LinearGradient colors={['#1E1B4B', '#312E81', '#1E1B4B']} style={s.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" />
 
       {/* Skip Button */}
-      <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
-        <Text style={styles.skipText}>Skip</Text>
+      <TouchableOpacity style={s.skipButton} onPress={handleSkip}>
+        <Text style={s.skipText}>Skip</Text>
+        <Ionicons name="chevron-forward" size={14} color="#A5B4FC" />
       </TouchableOpacity>
 
       {/* Content */}
-      <View style={styles.content}>
-        {/* Emoji Circle */}
-        <LinearGradient
-          colors={[slide.accent + '20', slide.accent + '08']}
-          style={[styles.emojiCircle, { borderColor: slide.accent + '30' }]}>
+      <View style={s.content}>
+        {/* Frosted Icon Circle */}
+        <View style={s.iconOuterRing}>
           <LinearGradient
-            colors={[slide.accent + '30', slide.accent + '15']}
-            style={styles.emojiInner}>
-            <Text style={styles.emoji}>{slide.emoji}</Text>
+            colors={slide.gradient}
+            style={s.iconCircle}>
+            <Ionicons name={slide.icon} size={48} color="#FFFFFF" />
           </LinearGradient>
-        </LinearGradient>
+        </View>
 
         {/* App name on first slide */}
         {currentSlide === 0 && (
-          <Text style={styles.appName}>Spendly</Text>
+          <View style={s.appBadge}>
+            <Ionicons name="wallet" size={14} color="#A78BFA" />
+            <Text style={s.appName}>SPENDLY</Text>
+          </View>
         )}
 
-        <Text style={[styles.title, { color: '#1A1A1A' }]}>{slide.title}</Text>
-        <Text style={styles.desc}>{slide.desc}</Text>
+        <Text style={s.title}>{slide.title}</Text>
+        <Text style={s.desc}>{slide.desc}</Text>
+
+        {/* Feature highlights */}
+        <View style={s.featureRow}>
+          <View style={s.featureChip}>
+            <Ionicons name="shield-checkmark" size={12} color="#A78BFA" />
+            <Text style={s.featureText}>Secure</Text>
+          </View>
+          <View style={s.featureChip}>
+            <Ionicons name="flash" size={12} color="#FBBF24" />
+            <Text style={s.featureText}>Instant</Text>
+          </View>
+          <View style={s.featureChip}>
+            <Ionicons name="cloud-offline" size={12} color="#34D399" />
+            <Text style={s.featureText}>Offline</Text>
+          </View>
+        </View>
       </View>
 
       {/* Bottom */}
-      <View style={styles.bottom}>
+      <View style={s.bottom}>
         {/* Dots */}
-        <View style={styles.dots}>
-          {SLIDES.map((s, i) => (
+        <View style={s.dots}>
+          {SLIDES.map((_, i) => (
             <View
               key={i}
               style={[
-                styles.dot,
-                i === currentSlide && { backgroundColor: slide.accent, width: 24 }
+                s.dot,
+                i === currentSlide && { backgroundColor: '#A78BFA', width: 28 }
               ]}
             />
           ))}
         </View>
 
         {/* Next Button */}
-        <TouchableOpacity style={styles.nextButtonContainer} onPress={handleNext}>
+        <TouchableOpacity style={s.nextButtonContainer} onPress={handleNext}>
           <LinearGradient
-            colors={[slide.accent, slide.accent + 'CC']}
-            style={styles.nextButton}>
-            <Text style={styles.nextButtonText}>
-              {currentSlide === SLIDES.length - 1 ? 'Get Started 🚀' : 'Next →'}
+            colors={slide.gradient}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={s.nextButton}>
+            <Text style={s.nextButtonText}>
+              {currentSlide === SLIDES.length - 1 ? 'Get Started' : 'Next'}
             </Text>
+            <Ionicons
+              name={currentSlide === SLIDES.length - 1 ? 'rocket' : 'arrow-forward'}
+              size={18}
+              color="#FFFFFF"
+            />
           </LinearGradient>
         </TouchableOpacity>
+
+        {/* Page indicator */}
+        <Text style={s.pageIndicator}>{currentSlide + 1} of {SLIDES.length}</Text>
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+const s = StyleSheet.create({
+  container: { flex: 1 },
   skipButton: {
     position: 'absolute',
     top: 55,
     right: 25,
     zIndex: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: '#F3F4F6',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  skipText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
+  skipText: { color: '#A5B4FC', fontSize: 13, fontWeight: '600' },
   content: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 30,
+    paddingHorizontal: 36,
   },
-  emojiCircle: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
+  iconOuterRing: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    borderWidth: 1.5,
+    borderColor: 'rgba(167,139,250,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    marginBottom: 36,
+  },
+  iconCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+  },
+  appBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(167,139,250,0.1)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 40,
+    borderColor: 'rgba(167,139,250,0.15)',
+    marginBottom: 16,
   },
-  emojiInner: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emoji: { fontSize: 56 },
   appName: {
-    fontSize: 14,
-    color: '#7C3AED',
-    fontWeight: 'bold',
+    fontSize: 12,
+    color: '#A78BFA',
+    fontWeight: '800',
     letterSpacing: 3,
-    textTransform: 'uppercase',
-    marginBottom: 12,
   },
   title: {
     fontSize: 30,
-    fontWeight: 'bold',
-    color: '#1A1A1A',
+    fontWeight: '800',
+    color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 16,
     lineHeight: 38,
   },
   desc: {
-    fontSize: 16,
-    color: '#6B7280',
+    fontSize: 15,
+    color: '#A5B4FC',
     textAlign: 'center',
-    lineHeight: 25,
+    lineHeight: 24,
+    fontWeight: '400',
+  },
+  featureRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 28,
+  },
+  featureChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  featureText: {
+    fontSize: 11,
+    color: '#C4B5FD',
+    fontWeight: '600',
   },
   bottom: {
     paddingHorizontal: 30,
@@ -170,32 +244,41 @@ const styles = StyleSheet.create({
   },
   dots: {
     flexDirection: 'row',
-    marginBottom: 30,
+    marginBottom: 28,
     gap: 8,
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: 'rgba(255,255,255,0.15)',
   },
   nextButtonContainer: {
     width: '100%',
-    borderRadius: 16,
+    borderRadius: 18,
     overflow: 'hidden',
-    elevation: 4,
+    elevation: 6,
     shadowColor: '#7C3AED',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
   },
   nextButton: {
     padding: 18,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   nextButtonText: {
     color: 'white',
     fontSize: 17,
-    fontWeight: 'bold',
+    fontWeight: '800',
+  },
+  pageIndicator: {
+    marginTop: 16,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.3)',
+    fontWeight: '500',
   },
 });
