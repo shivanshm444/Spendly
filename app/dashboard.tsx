@@ -63,7 +63,6 @@ export default function DashboardScreen() {
   const [selectedMonth, setSelectedMonth] = useState(monthOptions[0].key);
   const [selectedDashCat, setSelectedDashCat] = useState<string | null>(null);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  const [expandedSubCategory, setExpandedSubCategory] = useState<string | null>(null);
   const currentMonthData = monthOptions.find(m => m.key === selectedMonth)!;
 
   const filteredTransactions = transactions.filter(t => {
@@ -82,7 +81,13 @@ export default function DashboardScreen() {
 
   const categoryTotals: { [key: string]: number } = {};
   filteredTransactions.forEach(t => {
-    if (t.category) {
+    if (t.splits && t.splits.length > 0) {
+      // Distribute by each split's own category
+      t.splits.forEach(s => {
+        const cat = s.category || t.category || 'Other';
+        categoryTotals[cat] = (categoryTotals[cat] || 0) + s.amount;
+      });
+    } else if (t.category) {
       categoryTotals[t.category] = (categoryTotals[t.category] || 0) + t.amount;
     }
   });
@@ -223,7 +228,7 @@ export default function DashboardScreen() {
           <Text style={st.sectionTitle}>Category Breakdown</Text>
           <View style={st.countBadge}><Text style={st.countBadgeText}>{Object.keys(categoryTotals).length}</Text></View>
         </View>
-        <Text style={st.sectionHint}>Tap to drill down into subcategories & items</Text>
+        <Text style={st.sectionHint}>Tap a category to see item-wise spending</Text>
 
         {Object.entries(categoryTotals).length === 0 ? (
           <View style={st.emptyBox}>
@@ -240,24 +245,51 @@ export default function DashboardScreen() {
                 const catIcon = CATEGORY_ICONS[category] || 'wallet';
                 const pct = totalSpent > 0 ? ((catAmount / totalSpent) * 100).toFixed(1) : '0';
                 const isExpanded = expandedCategory === category;
-                const catTxns = filteredTransactions.filter(t => t.category === category);
                 const progressWidth = totalSpent > 0 ? ((catAmount / totalSpent) * 100) : 0;
 
-                const subCatMap: { [sub: string]: { amount: number; count: number; transactions: typeof catTxns } } = {};
-                catTxns.forEach(t => {
-                  const sub = t.subCategory || t.merchant || 'Other';
-                  if (!subCatMap[sub]) subCatMap[sub] = { amount: 0, count: 0, transactions: [] };
-                  subCatMap[sub].amount += t.amount;
-                  subCatMap[sub].count += 1;
-                  subCatMap[sub].transactions.push(t);
+                // Aggregate ALL items for this category across all transactions
+                // Handles: items array, splits (by split category), and plain transactions
+                const itemMap: { [name: string]: { amount: number; count: number; price: number } } = {};
+                let txnCount = 0;
+                filteredTransactions.forEach(t => {
+                  if (t.splits && t.splits.length > 0) {
+                    // Only include splits whose category matches this category
+                    t.splits.forEach(s => {
+                      const splitCat = s.category || t.category || 'Other';
+                      if (splitCat === category) {
+                        const key = s.description || 'Unnamed item';
+                        if (!itemMap[key]) itemMap[key] = { amount: 0, count: 0, price: 0 };
+                        itemMap[key].amount += s.amount;
+                        itemMap[key].count += 1;
+                        txnCount++;
+                      }
+                    });
+                  } else if (t.category === category) {
+                    txnCount++;
+                    if (t.items && t.items.length > 0) {
+                      t.items.forEach(item => {
+                        const key = item.name;
+                        if (!itemMap[key]) itemMap[key] = { amount: 0, count: 0, price: item.price };
+                        itemMap[key].amount += item.qty * item.price;
+                        itemMap[key].count += item.qty;
+                        itemMap[key].price = item.price;
+                      });
+                    } else {
+                      const key = t.notes || t.merchant || 'Transaction';
+                      if (!itemMap[key]) itemMap[key] = { amount: 0, count: 0, price: 0 };
+                      itemMap[key].amount += t.amount;
+                      itemMap[key].count += 1;
+                    }
+                  }
                 });
-                const sortedSubs = Object.entries(subCatMap).sort((a, b) => b[1].amount - a[1].amount);
+                const sortedItems = Object.entries(itemMap).sort((a, b) => b[1].amount - a[1].amount);
+                const topItemAmount = sortedItems.length > 0 ? sortedItems[0][1].amount : 1;
 
                 return (
                   <View key={category}>
                     <TouchableOpacity
                       style={[st.drillCatRow, isExpanded && { backgroundColor: catColor + '08', borderColor: catColor + '30' }]}
-                      onPress={() => { setExpandedCategory(isExpanded ? null : category); setExpandedSubCategory(null); }}
+                      onPress={() => setExpandedCategory(isExpanded ? null : category)}
                       activeOpacity={0.7}>
                       <LinearGradient colors={[catColor, catColor + 'CC']} style={st.drillCatIcon}>
                         <Ionicons name={catIcon as any} size={18} color="#fff" />
@@ -265,84 +297,67 @@ export default function DashboardScreen() {
                       <View style={st.drillCatInfo}>
                         <View style={st.drillCatTopRow}>
                           <Text style={st.drillCatName}>{category}</Text>
-                          <Text style={[st.drillCatAmount, { color: catColor }]}>₹{catAmount.toFixed(0)}</Text>
+                          <Text style={[st.drillCatAmount, { color: catColor }]}>₹{catAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</Text>
                         </View>
                         <View style={st.drillCatBarOuter}>
                           <View style={[st.drillCatBarInner, { width: `${progressWidth}%`, backgroundColor: catColor }]} />
                         </View>
                         <View style={st.drillCatBottomRow}>
-                          <Text style={st.drillCatMeta}>{catTxns.length} transaction{catTxns.length !== 1 ? 's' : ''}</Text>
+                          <Text style={st.drillCatMeta}>{txnCount} txn{txnCount !== 1 ? 's' : ''} · {sortedItems.length} item{sortedItems.length !== 1 ? 's' : ''}</Text>
                           <Text style={[st.drillCatPct, { color: catColor }]}>{pct}%</Text>
                         </View>
                       </View>
-                      <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={catColor} />
+                      <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={catColor} />
                     </TouchableOpacity>
 
-                    {isExpanded && (
-                      <View style={[st.drillSubContainer, { borderLeftColor: catColor + '40' }]}>
-                        {sortedSubs.map(([subName, subData]) => {
-                          const isSubExpanded = expandedSubCategory === `${category}-${subName}`;
-                          const subPct = catAmount > 0 ? ((subData.amount / catAmount) * 100).toFixed(0) : '0';
-                          const subBarWidth = catAmount > 0 ? ((subData.amount / catAmount) * 100) : 0;
+                    {isExpanded && sortedItems.length > 0 && (
+                      <View style={[st.itemsContainer, { borderLeftColor: catColor + '40' }]}>
+                        {/* Items header */}
+                        <View style={st.itemsHeader}>
+                          <Ionicons name="list" size={14} color={catColor} />
+                          <Text style={[st.itemsHeaderText, { color: catColor }]}>Item-wise Breakdown</Text>
+                          <View style={[st.itemsCountBadge, { backgroundColor: catColor + '15' }]}>
+                            <Text style={[st.itemsCountText, { color: catColor }]}>{sortedItems.length}</Text>
+                          </View>
+                        </View>
 
-                          const itemMap: { [name: string]: { amount: number; count: number; price: number } } = {};
-                          subData.transactions.forEach(t => {
-                            if (t.items && t.items.length > 0) {
-                              t.items.forEach(item => {
-                                const key = item.name;
-                                if (!itemMap[key]) itemMap[key] = { amount: 0, count: 0, price: item.price };
-                                itemMap[key].amount += item.qty * item.price;
-                                itemMap[key].count += item.qty;
-                                itemMap[key].price = item.price;
-                              });
-                            } else {
-                              const key = t.notes || t.merchant || 'Transaction';
-                              if (!itemMap[key]) itemMap[key] = { amount: 0, count: 0, price: 0 };
-                              itemMap[key].amount += t.amount;
-                              itemMap[key].count += 1;
-                            }
-                          });
-                          const sortedItemEntries = Object.entries(itemMap).sort((a, b) => b[1].amount - a[1].amount);
-
+                        {sortedItems.map(([itemName, itemData], idx) => {
+                          const itemPct = catAmount > 0 ? ((itemData.amount / catAmount) * 100) : 0;
+                          const itemBarWidth = topItemAmount > 0 ? ((itemData.amount / topItemAmount) * 100) : 0;
                           return (
-                            <View key={subName}>
-                              <TouchableOpacity
-                                style={[st.drillSubRow, isSubExpanded && { backgroundColor: catColor + '06' }]}
-                                onPress={() => setExpandedSubCategory(isSubExpanded ? null : `${category}-${subName}`)}
-                                activeOpacity={0.7}>
-                                <View style={[st.drillSubDot, { backgroundColor: catColor }]} />
-                                <View style={st.drillSubInfo}>
-                                  <View style={st.drillSubTopRow}>
-                                    <Text style={st.drillSubName}>{subName}</Text>
-                                    <Text style={[st.drillSubAmount, { color: catColor }]}>₹{subData.amount.toFixed(0)}</Text>
-                                  </View>
-                                  <View style={st.drillSubBarOuter}>
-                                    <View style={[st.drillSubBarInner, { width: `${subBarWidth}%`, backgroundColor: catColor + '50' }]} />
-                                  </View>
-                                  <Text style={st.drillSubMeta}>
-                                    {subData.count} transaction{subData.count !== 1 ? 's' : ''} · {subPct}% of {category}
-                                  </Text>
+                            <View key={itemName} style={st.itemRow}>
+                              <View style={st.itemLeftSection}>
+                                <View style={[st.itemRankBadge, { backgroundColor: catColor + (idx < 3 ? '20' : '10') }]}>
+                                  <Text style={[st.itemRankText, { color: catColor }]}>#{idx + 1}</Text>
                                 </View>
-                                <Ionicons name={isSubExpanded ? 'chevron-up' : 'chevron-down'} size={12} color={catColor} />
-                              </TouchableOpacity>
-
-                              {isSubExpanded && sortedItemEntries.length > 0 && (
-                                <View style={[st.drillItemContainer, { borderLeftColor: catColor + '25' }]}>
-                                  {sortedItemEntries.map(([itemName, itemData]) => (
-                                    <View key={itemName} style={st.drillItemRow}>
-                                      <View style={[st.drillItemDot, { backgroundColor: catColor + '60' }]} />
-                                      <Text style={st.drillItemName} numberOfLines={1}>{itemName}</Text>
-                                      {itemData.price > 0 && (
-                                        <Text style={st.drillItemUnit}>₹{itemData.price} × {itemData.count}</Text>
-                                      )}
-                                      <Text style={[st.drillItemAmount, { color: catColor }]}>₹{itemData.amount.toFixed(0)}</Text>
-                                    </View>
-                                  ))}
+                              </View>
+                              <View style={st.itemDetails}>
+                                <View style={st.itemTopRow}>
+                                  <Text style={st.itemName} numberOfLines={1}>{itemName}</Text>
+                                  <Text style={[st.itemAmount, { color: catColor }]}>₹{itemData.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</Text>
                                 </View>
-                              )}
+                                <View style={st.itemBarOuter}>
+                                  <View style={[st.itemBarInner, { width: `${itemBarWidth}%`, backgroundColor: catColor + '45' }]} />
+                                </View>
+                                <View style={st.itemBottomRow}>
+                                  {itemData.price > 0 ? (
+                                    <Text style={st.itemUnitInfo}>₹{itemData.price} × {itemData.count}</Text>
+                                  ) : (
+                                    <Text style={st.itemUnitInfo}>{itemData.count} time{itemData.count !== 1 ? 's' : ''}</Text>
+                                  )}
+                                  <Text style={[st.itemPct, { color: catColor }]}>{itemPct.toFixed(1)}%</Text>
+                                </View>
+                              </View>
                             </View>
                           );
                         })}
+
+                        {/* Category total footer */}
+                        <View style={[st.itemsFooter, { borderTopColor: catColor + '20' }]}>
+                          <Ionicons name="wallet-outline" size={14} color={catColor} />
+                          <Text style={st.itemsFooterText}>Total in {category}</Text>
+                          <Text style={[st.itemsFooterAmount, { color: catColor }]}>₹{catAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</Text>
+                        </View>
                       </View>
                     )}
                   </View>
@@ -546,25 +561,28 @@ const st = StyleSheet.create({
   drillCatMeta: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
   drillCatPct: { fontSize: 12, fontWeight: '700' },
 
-  // Subcategory
-  drillSubContainer: { marginLeft: 22, borderLeftWidth: 2, paddingLeft: 12, marginTop: 4, marginBottom: 4, gap: 4 },
-  drillSubRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 12, borderRadius: 16, borderWidth: 1, borderColor: '#F3F4F6', gap: 10, elevation: 1 },
-  drillSubDot: { width: 8, height: 8, borderRadius: 4 },
-  drillSubInfo: { flex: 1 },
-  drillSubTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  drillSubName: { fontSize: 14, fontWeight: '600', color: '#374151' },
-  drillSubAmount: { fontSize: 14, fontWeight: '700' },
-  drillSubBarOuter: { height: 3, backgroundColor: '#E5E7EB', borderRadius: 2, marginTop: 6, marginBottom: 4, overflow: 'hidden' },
-  drillSubBarInner: { height: 3, borderRadius: 2 },
-  drillSubMeta: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
-
-  // Item drill-down
-  drillItemContainer: { marginLeft: 28, borderLeftWidth: 2, paddingLeft: 10, marginTop: 2, marginBottom: 4, gap: 2 },
-  drillItemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, backgroundColor: '#FAFAFA', borderRadius: 12, gap: 8 },
-  drillItemDot: { width: 6, height: 6, borderRadius: 3 },
-  drillItemName: { flex: 1, fontSize: 13, color: '#4B5563', fontWeight: '500' },
-  drillItemUnit: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
-  drillItemAmount: { fontSize: 13, fontWeight: '700', minWidth: 50, textAlign: 'right' as const },
+  // Item breakdown (flat under category)
+  itemsContainer: { marginLeft: 22, borderLeftWidth: 2, paddingLeft: 12, marginTop: 4, marginBottom: 4, gap: 6 },
+  itemsHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 4 },
+  itemsHeaderText: { fontSize: 12, fontWeight: '700', letterSpacing: 0.3, textTransform: 'uppercase' as const, flex: 1 },
+  itemsCountBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  itemsCountText: { fontSize: 11, fontWeight: '700' },
+  itemRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 12, borderRadius: 16, borderWidth: 1, borderColor: '#F3F4F6', gap: 10, elevation: 1 },
+  itemLeftSection: { alignItems: 'center' },
+  itemRankBadge: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  itemRankText: { fontSize: 11, fontWeight: '800' },
+  itemDetails: { flex: 1 },
+  itemTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  itemName: { fontSize: 14, fontWeight: '600', color: '#1E1B4B', flex: 1, marginRight: 8 },
+  itemAmount: { fontSize: 15, fontWeight: '800' },
+  itemBarOuter: { height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, marginTop: 6, marginBottom: 4, overflow: 'hidden' },
+  itemBarInner: { height: 4, borderRadius: 2 },
+  itemBottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  itemUnitInfo: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
+  itemPct: { fontSize: 11, fontWeight: '700' },
+  itemsFooter: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 8, borderTopWidth: 1, marginTop: 4, gap: 6 },
+  itemsFooterText: { fontSize: 12, color: '#6B7280', fontWeight: '600', flex: 1 },
+  itemsFooterAmount: { fontSize: 14, fontWeight: '800' },
 
   // Merchants
   merchantRow: { backgroundColor: '#FFFFFF', marginHorizontal: 20, marginBottom: 10, padding: 15, borderRadius: 18, flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#EDE9FE', elevation: 2, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 6 },

@@ -31,7 +31,7 @@ export type Transaction = {
 type TransactionContextType = {
   transactions: Transaction[];
   setTransactions: (t: Transaction[]) => void;
-  updateTransaction: (index: number, category: string, notes: string, splits?: Split[], subCategory?: string, id?: string) => void;
+  updateTransaction: (index: number, category: string, notes: string, splits?: Split[], subCategory?: string, id?: string, items?: ItemEntry[]) => void;
   addTransaction: (t: Transaction) => void;
   pendingTransaction: Transaction | null;
   setPendingTransaction: (t: Transaction | null) => void;
@@ -140,7 +140,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     saveToFirebase(transactions, b);
   };
 
-  const updateTransaction = (index: number, category: string, notes: string, splits?: Split[], subCategory?: string, id?: string) => {
+  const updateTransaction = (index: number, category: string, notes: string, splits?: Split[], subCategory?: string, id?: string, items?: ItemEntry[]) => {
     let updated = [...transactions];
     let targetIndex = index;
 
@@ -152,7 +152,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     }
 
     if (targetIndex !== -1) {
-      updated[targetIndex] = { ...updated[targetIndex], category, subCategory, notes, splits };
+      updated[targetIndex] = { ...updated[targetIndex], category, subCategory, notes, splits, items };
       setTransactionsState(updated);
       saveToFirebase(updated, budgets);
     }

@@ -118,10 +118,10 @@ const getAISuggestion = (merchant: string, smsBody: string = ''): { category: st
 // Words that indicate a line is NOT an item (totals, headers, etc.)
 const SKIP_WORDS = [
   'total', 'subtotal', 'sub total', 'grand total', 'net total', 'net amount',
-  'gross amt', 'gross amount', 'net amt',
+  'gross amt', 'gross amount', 'net amt', 'gross', 'net',
   'tax', 'gst', 'cgst', 'sgst', 'igst', 'vat', 'cess',
-  'discount', 'savings', 'you saved', 'cashback', 'saved',
-  'change', 'cash tendered', 'card', 'upi', 'payment', 'paid', 'balance',
+  'discount', 'savings', 'you saved', 'cashback', 'saved', 'off mrp',
+  'change', 'cash tendered', 'cash', 'card', 'upi', 'payment', 'paid', 'balance',
   'thank', 'visit', 'welcome', 'invoice', 'bill no', 'receipt',
   'date', 'time', 'counter', 'cashier', 'customer', 'member',
   'phone', 'tel', 'mobile', 'email', 'address', 'gstin', 'tin:',
@@ -130,12 +130,24 @@ const SKIP_WORDS = [
   'store no', 'store id', 'branch', 'outlet',
   'c-mem', 'mem no', 'member no', 'loyalty',
   'item descrip', 'item description', 'description', 'particulars',
-  'qty', 'rate', 'amount', 'mrp', 'price',
   'computer generated', 'copy', 'original',
   'avenues', 'supermarts', 'ltd', 'pvt',
   'total items', 'no of items', 'items:',
   'cash memo', 'tax invoice', 'retail',
 ];
+
+// Names that are just currency/junk — not real items
+const JUNK_NAMES = ['rs', 'rs.', 'inr', 'mrp', 'amt', 'amount', 'rate', 'qty', 'price', 'no', 'sr'];
+
+/**
+ * Check if a number at the given position is part of a product size spec
+ * e.g., "500G", "2L", "8PK", "200G", "250ML", "1KG", "1.5L"
+ */
+const isProductSize = (line: string, numIndex: number, numRaw: string): boolean => {
+  const afterNum = line.substring(numIndex + numRaw.length).toUpperCase();
+  // Check if immediately followed by a size unit (no space)
+  return /^(G|GM|GMS|KG|L|LTR|ML|PK|PKT|PC|PCS|MM|CM|M)\b/i.test(afterNum);
+};
 
 /**
  * Parse raw OCR text from a receipt into structured items.
@@ -160,37 +172,34 @@ const parseReceiptText = (rawText: string): ItemEntry[] => {
     if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(line)) continue;
     // Skip lines that are all uppercase headers without numbers (like "D-MART", "KORAMANGALA, BANGALORE")
     if (/^[A-Z\s,.\-]+$/.test(line) && !/\d/.test(line)) continue;
-    // Skip lines that are just a location/address
-    if (/^\w+,\s*\w+$/.test(line)) continue;
+    // Skip lines starting with Rs/Rs./INR followed by a number (these are totals/subtotals)
+    if (/^\s*(rs\.?|inr|₹)\s*\d/i.test(line)) continue;
 
     // Find ALL numbers in this line (to handle tabular formats)
     const allNumbers = [...line.matchAll(/(\d+(?:[.,]\d{1,2})?)/g)].map(m => ({
       value: parseFloat(m[1].replace(',', '.')),
       index: m.index!,
       raw: m[0],
+      isSize: isProductSize(line, m.index!, m[0]), // e.g., 500G, 2L
     }));
 
-    // Need at least one number that looks like a price
-    if (allNumbers.length === 0) continue;
+    // Need at least one number that looks like a price (not a product size)
+    const priceNumbers = allNumbers.filter(n => !n.isSize);
+    if (priceNumbers.length === 0) continue;
 
-    // For tabular receipts (QTY RATE AMOUNT), the LAST number is typically the total amount
-    // Pick the last number as the price (it's the line total in tabular formats)
-    const lastNum = allNumbers[allNumbers.length - 1];
+    // For tabular receipts (QTY RATE AMOUNT), the LAST non-size number is the total amount
+    const lastNum = priceNumbers[priceNumbers.length - 1];
     const price = lastNum.value;
     
     // Skip unreasonable prices
     if (isNaN(price) || price < 5 || price > 100000) continue;
 
-    // Extract quantity: in tabular receipts, it's usually the first standalone number
+    // Extract quantity: find the first standalone small number that's not a product size
     let qty = 1;
-    if (allNumbers.length >= 3) {
-      // Tabular format: NAME QTY RATE AMOUNT
-      // First number after the name text is usually qty
-      // Find the first number that is small (1-99) and stands alone
-      for (let i = 0; i < allNumbers.length - 1; i++) {
-        const n = allNumbers[i];
+    if (priceNumbers.length >= 3) {
+      for (let i = 0; i < priceNumbers.length - 1; i++) {
+        const n = priceNumbers[i];
         if (n.value >= 1 && n.value <= 99 && Number.isInteger(n.value)) {
-          // Check this isn't part of the item name (like "500G")
           const charBefore = line[n.index - 1] || ' ';
           const charAfter = line[n.index + n.raw.length] || ' ';
           if (/\s/.test(charBefore) && /[\s.]/.test(charAfter)) {
@@ -201,18 +210,18 @@ const parseReceiptText = (rawText: string): ItemEntry[] => {
       }
     }
 
-    // Extract item name: everything before the first number that looks like qty/rate/amount
-    // Find where the numeric columns start
+    // Extract item name: everything before the numeric columns start
+    // A numeric column starts where we see a non-size number preceded by 2+ spaces
     let nameEndIndex = line.length;
     for (let i = 0; i < allNumbers.length; i++) {
       const n = allNumbers[i];
-      // Check if this number is preceded by whitespace (start of numeric columns)
+      if (n.isSize) continue; // Skip size numbers — they're part of the product name
+
       const textBefore = line.substring(0, n.index).trim();
-      if (textBefore.length >= 3 && /[A-Za-z]/.test(textBefore)) {
-        // Check if there's a clear gap before this number (tabular column separator)
-        const charBefore = line[n.index - 1] || '';
-        const twoCharBefore = line.substring(Math.max(0, n.index - 2), n.index);
-        if (/\s{2}/.test(twoCharBefore) || /\s/.test(charBefore)) {
+      if (textBefore.length >= 2 && /[A-Za-z]/.test(textBefore)) {
+        // Check for a clear column gap (2+ spaces before this number)
+        const fiveCharBefore = line.substring(Math.max(0, n.index - 5), n.index);
+        if (/\s{2,}/.test(fiveCharBefore)) {
           nameEndIndex = n.index;
           break;
         }
@@ -224,7 +233,6 @@ const parseReceiptText = (rawText: string): ItemEntry[] => {
     // Remove serial number prefix like "1.", "2.", "3."
     name = name.replace(/^\d{1,2}\.\s*/, '');
 
-    // Remove any remaining numbers that are part of product specs but keep sizes like "500G", "2L"
     // Clean up
     name = name
       .replace(/[₹$*#]+/g, '')
@@ -238,6 +246,8 @@ const parseReceiptText = (rawText: string): ItemEntry[] => {
     if (/^\d+$/.test(name)) continue;
     // Must contain at least one letter
     if (!/[A-Za-z]/.test(name)) continue;
+    // Skip junk names like "Rs", "Rs.", "INR" etc.
+    if (JUNK_NAMES.includes(name.toLowerCase().replace(/\.$/, ''))) continue;
 
     // Capitalize first letter of each word
     name = name.replace(/\b\w/g, c => c.toUpperCase());
@@ -513,23 +523,49 @@ export default function AnnotationScreen() {
 
   const handleItemTap = async (itemName: string) => {
     if (itemName === 'Other') {
-      // 'Other' just sets notes mode, no price panel
       setActivePriceItem(null);
       return;
     }
-    // If already showing price panel for this item, close it
+
+    // If price panel is already open for this item AND it's in cart, toggle it off (remove)
     if (activePriceItem === itemName) {
+      const existingIdx = cartItems.findIndex(i => i.name === itemName);
+      if (existingIdx !== -1) {
+        setCartItems(prev => prev.filter((_, i) => i !== existingIdx));
+      }
       setActivePriceItem(null);
       return;
     }
-    // Load last-used price
-    const lastPrice = await getPriceMemory(itemName);
-    setLastUsedPrice(lastPrice);
-    // Build price options
-    let prices = [...DEFAULT_PRICES];
-    if (lastPrice && !prices.includes(lastPrice)) {
-      prices = [lastPrice, ...prices];
+
+    // If item is already in cart, just open price panel to let user change the price
+    const existingIdx = cartItems.findIndex(i => i.name === itemName);
+    if (existingIdx !== -1) {
+      const lastPrice = await getPriceMemory(itemName);
+      setLastUsedPrice(lastPrice);
+      let prices = [...DEFAULT_PRICES];
+      if (lastPrice && !prices.includes(lastPrice)) prices = [lastPrice, ...prices];
+      setPricePanelPrices(prices);
+      setActivePriceItem(itemName);
+      return;
     }
+
+    // Auto-add to cart with remaining amount
+    const remaining = Math.max(0, totalAmount - cartTotal);
+    const itemPrice = remaining > 0 ? remaining : totalAmount;
+
+    // Always default to remaining amount — last-used price is just an option in the panel
+    const lastPrice = await getPriceMemory(itemName);
+
+    setCartItems(prev => [...prev, { name: itemName, qty: 1, price: itemPrice }]);
+
+    // Also open price panel so user can change it
+    setLastUsedPrice(lastPrice);
+    let prices = [...DEFAULT_PRICES];
+    // Add the auto-filled price and last-used price to options
+    if (itemPrice && !prices.includes(itemPrice)) prices = [itemPrice, ...prices];
+    if (lastPrice && !prices.includes(lastPrice)) prices = [lastPrice, ...prices];
+    // Sort prices ascending for a clean look
+    prices = [...new Set(prices)].sort((a, b) => a - b);
     setPricePanelPrices(prices);
     setActivePriceItem(itemName);
   };
@@ -538,11 +574,12 @@ export default function AnnotationScreen() {
     // Save price memory
     await savePriceMemory(itemName, price);
 
-    // Add to cart or increment quantity
+    // Update existing cart item's price if it exists, otherwise add new
     setCartItems(prev => {
-      const existing = prev.find(i => i.name === itemName && i.price === price);
-      if (existing) {
-        return prev.map(i => i.name === itemName && i.price === price ? { ...i, qty: i.qty + 1 } : i);
+      const existingIdx = prev.findIndex(i => i.name === itemName);
+      if (existingIdx !== -1) {
+        // Update the price of the existing item
+        return prev.map((item, i) => i === existingIdx ? { ...item, price } : item);
       }
       return [...prev, { name: itemName, qty: 1, price }];
     });
@@ -616,7 +653,7 @@ export default function AnnotationScreen() {
       addTransaction({ amount: savedAmount, merchant, date, message, category: finalCategory, subCategory: finalSubCategory, notes: finalNotes, items: cartItems.length > 0 ? cartItems : undefined });
       setPendingTransaction(null);
     } else {
-      updateTransaction(index, finalCategory, finalNotes, undefined, finalSubCategory, txnId);
+      updateTransaction(index, finalCategory, finalNotes, undefined, finalSubCategory, txnId, cartItems.length > 0 ? cartItems : undefined);
     }
 
     const checkBudgetAlert = async (category: string, txnAmount: number) => {
@@ -648,6 +685,16 @@ export default function AnnotationScreen() {
 
   const handleSave = async () => {
     if (!selectedCategory) { Alert.alert('Please select a category!'); return; }
+
+    // If cart total exceeds the transaction amount, warn the user
+    if (cartItems.length > 0 && cartTotal > totalAmount) {
+      const exceeding = cartTotal - totalAmount;
+      Alert.alert(
+        '🚫 Cart Exceeds Transaction',
+        `Your cart total (₹${cartTotal.toFixed(0)}) is ₹${exceeding.toFixed(0)} more than the transaction amount (₹${totalAmount.toFixed(0)}).\n\nPlease remove items or adjust quantities.`
+      );
+      return;
+    }
 
     // If user has items in cart but cart total < transaction amount, warn about uncategorized amount
     if (cartItems.length > 0 && cartTotal < totalAmount) {
@@ -823,7 +870,7 @@ export default function AnnotationScreen() {
           {/* ── Price Selection Panel ──────────────────────── */}
           {activePriceItem && (
             <View style={styles.pricePanelContainer}>
-              <Text style={styles.pricePanelTitle}>💰 Price for {activePriceItem}</Text>
+              <Text style={styles.pricePanelTitle}>💰 Change price for {activePriceItem} {cartItems.find(i => i.name === activePriceItem) ? `(currently ₹${cartItems.find(i => i.name === activePriceItem)!.price})` : ''}</Text>
               <View style={styles.pricePanelGrid}>
                 {pricePanelPrices.map((price) => (
                   <TouchableOpacity key={price} style={[styles.priceChip, lastUsedPrice === price && styles.priceChipLast]}
