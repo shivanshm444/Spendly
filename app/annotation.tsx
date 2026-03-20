@@ -16,7 +16,7 @@ import { db, auth } from '../firebase.config';
 // @ts-ignore
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
-import { GEMINI_API_KEY } from '../config';
+import { GEMINI_API_KEY, GROQ_API_KEY } from '../config';
 
 // ─── Category Definitions ────────────────────────────────────────────────────
 
@@ -133,7 +133,7 @@ const SKIP_WORDS = [
   'computer generated', 'copy', 'original',
   'avenues', 'supermarts', 'ltd', 'pvt',
   'total items', 'no of items', 'items:',
-  'cash memo', 'tax invoice', 'retail',
+  'cash memo', 'tax invoice', 'retail', 'savings', 'off mrp', 'off nrp', 'member no', 'visit again',
 ];
 
 // Names that are just currency/junk — not real items
@@ -172,8 +172,8 @@ const parseReceiptText = (rawText: string): ItemEntry[] => {
     if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(line)) continue;
     // Skip lines that are all uppercase headers without numbers (like "D-MART", "KORAMANGALA, BANGALORE")
     if (/^[A-Z\s,.\-]+$/.test(line) && !/\d/.test(line)) continue;
-    // Skip lines starting with Rs/Rs./INR followed by a number (these are totals/subtotals)
-    if (/^\s*(rs\.?|inr|₹)\s*\d/i.test(line)) continue;
+    // Skip lines starting with Rs/Rs./INR/Re. followed by a number (these are totals/subtotals)
+    if (/^\s*(rs\.?|inr|re\.?|₹)\s*\d/i.test(line)) continue;
 
     // Find ALL numbers in this line (to handle tabular formats)
     const allNumbers = [...line.matchAll(/(\d+(?:[.,]\d{1,2})?)/g)].map(m => ({
@@ -183,11 +183,17 @@ const parseReceiptText = (rawText: string): ItemEntry[] => {
       isSize: isProductSize(line, m.index!, m[0]), // e.g., 500G, 2L
     }));
 
-    // Need at least one number that looks like a price (not a product size)
+    // For tabular receipts (QTY RATE AMOUNT), the LAST non-size number is the total amount
+    // BUT we must ensure the "last number" isn't actually a serial number at the start
+    // If there's only one number and it's at the very beginning, skip it
     const priceNumbers = allNumbers.filter(n => !n.isSize);
     if (priceNumbers.length === 0) continue;
 
-    // For tabular receipts (QTY RATE AMOUNT), the LAST non-size number is the total amount
+    // Reject if the only number is a serial number (at the start of the line)
+    if (priceNumbers.length === 1 && priceNumbers[0].index < 5 && Number.isInteger(priceNumbers[0].value)) {
+      continue;
+    }
+
     const lastNum = priceNumbers[priceNumbers.length - 1];
     const price = lastNum.value;
     
@@ -264,7 +270,105 @@ const parseReceiptText = (rawText: string): ItemEntry[] => {
 };
 
 /**
- * Scan a receipt using on-device ML Kit Text Recognition.
+ * Scan a receipt using Groq Vision API (Llama 4 Scout).
+ * Sends the image to Groq and gets structured items back — no regex needed.
+ * Free: 14,400 requests/day.
+ */
+const scanReceiptWithGroq = async (
+  imageUri: string
+): Promise<ItemEntry[] | null> => {
+  try {
+    if (!GROQ_API_KEY) return null;
+
+    console.log('Groq Receipt: Reading image as base64...');
+    const FileSystem = require('expo-file-system');
+    const base64Image = await FileSystem.readAsStringAsync(imageUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    console.log('Groq Receipt: Sending to Groq Vision API...');
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY.trim()}`,
+      },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64Image}`,
+                },
+              },
+              {
+                type: 'text',
+                text: `You are a receipt parser. Extract ONLY the purchased items from this receipt image.
+
+RULES:
+- Extract only actual product items (food, drinks, groceries, etc.)
+- Do NOT include totals, tax, VAT, GST, discounts, change, cash tendered, or any summary lines
+- Do NOT include store name, address, date, time, or any header/footer info
+- Keep product sizes/variants in the name (e.g., "Amul Butter 500G", "Coke 2L Bottle")
+- For quantity, use the QTY column if visible, otherwise default to 1
+- For price, use the per-unit RATE/MRP, NOT the total amount for that line
+
+Return ONLY a valid JSON array, nothing else. No markdown, no explanation. Format:
+[{"name":"Item Name","qty":1,"price":123.00}]
+
+If you cannot read the receipt or find no items, return: []`,
+              },
+            ],
+          },
+        ],
+        max_tokens: 1024,
+        temperature: 0.1,
+      }),
+    });
+
+    if (!response.ok) {
+      console.log('Groq Receipt: API error', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const text = data?.choices?.[0]?.message?.content || '';
+    console.log('Groq Receipt: Response:', text.substring(0, 200));
+
+    // Extract JSON from response (might be wrapped in markdown code block)
+    const jsonMatch = text.match(/\[[\s\S]*?\]/);
+    if (!jsonMatch) {
+      console.log('Groq Receipt: No JSON array found in response');
+      return null;
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+
+    // Validate and clean the items
+    const items: ItemEntry[] = parsed
+      .filter((item: any) => item.name && typeof item.price === 'number' && item.price > 0)
+      .map((item: any) => ({
+        name: String(item.name).substring(0, 35),
+        qty: Math.max(1, Math.min(parseInt(item.qty) || 1, 99)),
+        price: Math.round(parseFloat(item.price) * 100) / 100,
+      }));
+
+    console.log('Groq Receipt: Parsed', items.length, 'valid items');
+    return items.length > 0 ? items : null;
+
+  } catch (e) {
+    console.log('Groq Receipt: Error:', e);
+    return null;
+  }
+};
+
+/**
+ * Scan a receipt using on-device ML Kit Text Recognition (offline fallback).
  * No API key needed, works offline.
  */
 const scanReceiptOnDevice = async (
@@ -471,9 +575,18 @@ export default function AnnotationScreen() {
       setReceiptScanning(true);
       setReceiptPreview(imageUri);
 
-      // Use on-device ML Kit OCR (no API key needed)
-      const items = await scanReceiptOnDevice(imageUri);
-      console.log('Receipt Scan: Result:', items ? `${items.length} items` : 'null');
+      // Try Groq Vision first (best accuracy), then fall back to on-device ML Kit
+      console.log('Receipt Scan: Trying Groq Vision API...');
+      let items = await scanReceiptWithGroq(imageUri);
+      let scanMethod = 'Groq AI';
+      
+      if (!items || items.length === 0) {
+        console.log('Receipt Scan: Gemini failed, trying on-device ML Kit...');
+        items = await scanReceiptOnDevice(imageUri);
+        scanMethod = 'On-device OCR';
+      }
+
+      console.log('Receipt Scan: Result:', items ? `${items.length} items via ${scanMethod}` : 'null');
 
       if (!items || items.length === 0) {
         setReceiptScanning(false);
@@ -499,7 +612,7 @@ export default function AnnotationScreen() {
       const totalScanned = items.reduce((sum, i) => sum + i.qty * i.price, 0);
       Alert.alert(
         '✅ Receipt Scanned!',
-        `Found ${items.length} items totalling ₹${totalScanned.toFixed(0)}.\nYou can edit items below.`
+        `Found ${items.length} items totalling ₹${totalScanned.toFixed(0)} (via ${scanMethod}).\nYou can edit items below.`
       );
     } catch (e) {
       console.log('Scan receipt error:', e);

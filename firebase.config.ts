@@ -7,12 +7,12 @@ import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCcOIROcopmugfW0RW2fzi-c_dmrUpMy3I",
-  authDomain: "banktracker-3b12a.firebaseapp.com",
-  projectId: "banktracker-3b12a",
-  storageBucket: "banktracker-3b12a.firebasestorage.app",
-  messagingSenderId: "76596635447",
-  appId: "1:76596635447:web:b2e036fdb34d04f4a59cb2"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "",
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "",
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || ""
 };
 
 export const app = initializeApp(firebaseConfig);
