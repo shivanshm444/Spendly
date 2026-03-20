@@ -1,8 +1,8 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { db, auth } from '../firebase.config';
+import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import { auth, db } from '../firebase.config';
 // @ts-ignore
-import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export type Split = {
   amount: number;
@@ -14,6 +14,7 @@ export type ItemEntry = {
   name: string;
   qty: number;
   price: number; // price per unit
+  category?: string; // item-level category for breakdown
 };
 
 export type Transaction = {
@@ -31,7 +32,7 @@ export type Transaction = {
 type TransactionContextType = {
   transactions: Transaction[];
   setTransactions: (t: Transaction[]) => void;
-  updateTransaction: (index: number, category: string, notes: string, splits?: Split[], subCategory?: string, id?: string, items?: ItemEntry[]) => void;
+  updateTransaction: (index: number, category: string, notes: string, splits?: Split[], subCategory?: string, id?: string, items?: ItemEntry[], merchant?: string, amount?: number) => void;
   addTransaction: (t: Transaction) => void;
   pendingTransaction: Transaction | null;
   setPendingTransaction: (t: Transaction | null) => void;
@@ -140,7 +141,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     saveToFirebase(transactions, b);
   };
 
-  const updateTransaction = (index: number, category: string, notes: string, splits?: Split[], subCategory?: string, id?: string, items?: ItemEntry[]) => {
+  const updateTransaction = (index: number, category: string, notes: string, splits?: Split[], subCategory?: string, id?: string, items?: ItemEntry[], merchant?: string, amount?: number) => {
     let updated = [...transactions];
     let targetIndex = index;
 
@@ -152,7 +153,10 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     }
 
     if (targetIndex !== -1) {
-      updated[targetIndex] = { ...updated[targetIndex], category, subCategory, notes, splits, items };
+      const updates: Partial<Transaction> = { category, subCategory, notes, splits, items };
+      if (merchant !== undefined) updates.merchant = merchant;
+      if (amount !== undefined) updates.amount = amount;
+      updated[targetIndex] = { ...updated[targetIndex], ...updates };
       setTransactionsState(updated);
       saveToFirebase(updated, budgets);
     }

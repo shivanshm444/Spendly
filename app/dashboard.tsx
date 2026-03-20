@@ -1,11 +1,10 @@
-import { useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, Dimensions, StatusBar } from 'react-native';
-import { useRouter } from 'expo-router';
-import { TouchableOpacity } from 'react-native';
-import { useTransactions } from '../context/TransactionContext';
-import { PieChart } from 'react-native-chart-kit';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+import { useState } from 'react';
+import { Dimensions, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { PieChart } from 'react-native-chart-kit';
+import { useTransactions } from '../context/TransactionContext';
 
 const screenWidth = Dimensions.get('window').width;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -22,6 +21,53 @@ const CATEGORY_ICONS: { [key: string]: string } = {
   Entertainment: 'film', Groceries: 'storefront', Health: 'medkit',
   Rent: 'home', Education: 'school', Other: 'wallet',
   Snacks: 'fast-food', Dairy: 'water',
+};
+
+// Normalize item names to group similar items together
+// "Amul Butter 500g" → "Butter", "Maggi Noodles 8pk" → "Noodles"
+const normalizeItemName = (name: string): string => {
+  let n = name.toLowerCase().trim();
+
+  // Remove common brand names
+  const brands = [
+    'amul', 'nestle', 'britannia', 'parle', 'haldirams', 'mother dairy', 'verka',
+    'tata', 'patanjali', 'dabur', 'himalaya', 'colgate', 'pepsico', 'coca cola',
+    'pepsi', 'coke', 'sprite', 'fanta', 'mirinda', 'thumbs up', 'thums up', '7up',
+    'maggi', 'knorr', 'top ramen', 'yippee', 'sunfeast', 'good day', 'oreo',
+    'cadbury', 'dairy milk', 'kit kat', 'munch', '5 star', 'gems', 'perk',
+    'lays', 'kurkure', 'bingo', 'act ii', 'too yumm', 'bikano', 'balaji',
+    'fortune', 'saffola', 'sundrop', 'nature fresh', 'dhara', 'gemini',
+    'aashirvaad', 'pillsbury', 'annapurna', 'shakti bhog',
+    'real', 'tropicana', 'paper boat', 'frooti', 'maaza', 'slice', 'appy',
+    'lipton', 'red label', 'taj mahal', 'wagh bakri', 'society',
+    'surf excel', 'ariel', 'tide', 'rin', 'vim', 'lizol', 'harpic', 'dettol',
+    'lifebuoy', 'lux', 'dove', 'nivea', 'pond\'s', 'fair & lovely', 'vaseline',
+    'clinic plus', 'head & shoulders', 'pantene', 'sunsilk', 'garnier',
+    'closeup', 'pepsodent', 'sensodyne', 'oral-b',
+    'horlicks', 'bournvita', 'boost', 'complan', 'protinex',
+    'kellogg\'s', 'kelloggs', 'quaker', 'saffola', 'bagrry\'s',
+    'd-mart', 'dmart', 'big bazaar', 'reliance', 'spencer\'s', 'spencers', 'more',
+  ];
+
+  for (const brand of brands) {
+    n = n.replace(new RegExp(`\\b${brand}\\b`, 'gi'), '').trim();
+  }
+
+  // Remove sizes/quantities (500g, 200ml, 1L, 1kg, 8pk, 2L, etc.)
+  n = n.replace(/\b\d+(\.\d+)?\s*(g|gm|gram|grams|kg|kgs|ml|l|ltr|litre|litres|liter|liters|pk|pcs|piece|pieces|pack|packs|unit|units)\b/gi, '').trim();
+
+  // Remove extra spaces
+  n = n.replace(/\s+/g, ' ').trim();
+
+  // Capitalize first letter of each word
+  n = n.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+
+  // If empty after cleaning, return original
+  if (!n || n.length < 2) {
+    return name.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+  }
+
+  return n;
 };
 
 const generateMonthOptions = () => {
@@ -86,6 +132,13 @@ export default function DashboardScreen() {
       t.splits.forEach(s => {
         const cat = s.category || t.category || 'Other';
         categoryTotals[cat] = (categoryTotals[cat] || 0) + s.amount;
+      });
+    } else if (t.items && t.items.length > 0) {
+      // Distribute by each item's category (from receipt scanning)
+      t.items.forEach(item => {
+        const cat = item.category || t.category || 'Other';
+        const itemTotal = item.qty * item.price;
+        categoryTotals[cat] = (categoryTotals[cat] || 0) + itemTotal;
       });
     } else if (t.category) {
       categoryTotals[t.category] = (categoryTotals[t.category] || 0) + t.amount;
@@ -248,7 +301,7 @@ export default function DashboardScreen() {
                 const progressWidth = totalSpent > 0 ? ((catAmount / totalSpent) * 100) : 0;
 
                 // Aggregate ALL items for this category across all transactions
-                // Handles: items array, splits (by split category), and plain transactions
+                // Handles: items array (with per-item categories), splits (by split category), and plain transactions
                 const itemMap: { [name: string]: { amount: number; count: number; price: number } } = {};
                 let txnCount = 0;
                 filteredTransactions.forEach(t => {
@@ -257,29 +310,34 @@ export default function DashboardScreen() {
                     t.splits.forEach(s => {
                       const splitCat = s.category || t.category || 'Other';
                       if (splitCat === category) {
-                        const key = s.description || 'Unnamed item';
+                        const key = normalizeItemName(s.description || 'Unnamed item');
                         if (!itemMap[key]) itemMap[key] = { amount: 0, count: 0, price: 0 };
                         itemMap[key].amount += s.amount;
                         itemMap[key].count += 1;
                         txnCount++;
                       }
                     });
-                  } else if (t.category === category) {
-                    txnCount++;
-                    if (t.items && t.items.length > 0) {
-                      t.items.forEach(item => {
-                        const key = item.name;
+                  } else if (t.items && t.items.length > 0) {
+                    // Check each item's category (for receipt-scanned items)
+                    let hasMatchingItem = false;
+                    t.items.forEach(item => {
+                      const itemCat = item.category || t.category || 'Other';
+                      if (itemCat === category) {
+                        const key = normalizeItemName(item.name);
                         if (!itemMap[key]) itemMap[key] = { amount: 0, count: 0, price: item.price };
                         itemMap[key].amount += item.qty * item.price;
                         itemMap[key].count += item.qty;
                         itemMap[key].price = item.price;
-                      });
-                    } else {
-                      const key = t.notes || t.merchant || 'Transaction';
-                      if (!itemMap[key]) itemMap[key] = { amount: 0, count: 0, price: 0 };
-                      itemMap[key].amount += t.amount;
-                      itemMap[key].count += 1;
-                    }
+                        hasMatchingItem = true;
+                      }
+                    });
+                    if (hasMatchingItem) txnCount++;
+                  } else if (t.category === category) {
+                    txnCount++;
+                    const key = normalizeItemName(t.notes || t.merchant || 'Transaction');
+                    if (!itemMap[key]) itemMap[key] = { amount: 0, count: 0, price: 0 };
+                    itemMap[key].amount += t.amount;
+                    itemMap[key].count += 1;
                   }
                 });
                 const sortedItems = Object.entries(itemMap).sort((a, b) => b[1].amount - a[1].amount);

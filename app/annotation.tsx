@@ -1,18 +1,26 @@
-import { useState, useEffect } from 'react';
-import {
-  StyleSheet, Text, View, TouchableOpacity, TextInput,
-  ScrollView, Alert, ActivityIndicator, StatusBar, Modal, Image
-} from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import TextRecognition from '@react-native-ml-kit/text-recognition';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useTransactions, Split, ItemEntry } from '../context/TransactionContext';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import TextRecognition from '@react-native-ml-kit/text-recognition';
+import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StatusBar,
+  StyleSheet, Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from 'react-native';
+import { ItemEntry, useTransactions } from '../context/TransactionContext';
+import { auth, db } from '../firebase.config';
 let Notifications: any = null;
 try { Notifications = require('expo-notifications'); } catch (e) { /* Expo Go SDK 53 */ }
-import { db, auth } from '../firebase.config';
 // @ts-ignore
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
@@ -274,17 +282,22 @@ const parseReceiptText = (rawText: string): ItemEntry[] => {
  * Sends the image to Groq and gets structured items back — no regex needed.
  * Free: 14,400 requests/day.
  */
-const scanReceiptWithGroq = async (
-  imageUri: string
-): Promise<ItemEntry[] | null> => {
-  try {
-    if (!GROQ_API_KEY) return null;
+interface ScanResult {
+  items: ItemEntry[];
+  netTotal: number;
+  storeName: string;
+}
 
-    console.log('Groq Receipt: Reading image as base64...');
-    const FileSystem = require('expo-file-system');
-    const base64Image = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+const scanReceiptWithGroq = async (
+  base64Image: string
+): Promise<ScanResult | null> => {
+  try {
+    if (!GROQ_API_KEY) {
+      console.log('Groq Receipt: No API key configured');
+      return null;
+    }
+    console.log('Groq Receipt: API key present, length:', GROQ_API_KEY.length);
+    console.log('Groq Receipt: Image base64 length:', base64Image.length);
 
     console.log('Groq Receipt: Sending to Groq Vision API...');
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -307,20 +320,39 @@ const scanReceiptWithGroq = async (
               },
               {
                 type: 'text',
-                text: `You are a receipt parser. Extract ONLY the purchased items from this receipt image.
+                text: `You are an expert Indian receipt parser. Extract ONLY the purchased product items from this receipt.
 
-RULES:
-- Extract only actual product items (food, drinks, groceries, etc.)
-- Do NOT include totals, tax, VAT, GST, discounts, change, cash tendered, or any summary lines
-- Do NOT include store name, address, date, time, or any header/footer info
-- Keep product sizes/variants in the name (e.g., "Amul Butter 500G", "Coke 2L Bottle")
-- For quantity, use the QTY column if visible, otherwise default to 1
-- For price, use the per-unit RATE/MRP, NOT the total amount for that line
+WHAT TO EXTRACT (product rows only):
+- Food items (Kellogg's, Maggi, Bournvita, Britannia, etc.)
+- Beverages (Coca-Cola, Pepsi, Nescafe, etc.)
+- Dairy (Amul Butter, Milk, Paneer, etc.)
+- Groceries (Oil, Rice, Atta, etc.)
+- Household items (Surf Excel, Vim, etc.)
 
-Return ONLY a valid JSON array, nothing else. No markdown, no explanation. Format:
-[{"name":"Item Name","qty":1,"price":123.00}]
+WHAT TO IGNORE (do NOT include these):
+- Store name, address, phone, GSTIN, FSSAI
+- Date, time, bill number, invoice number, C-MEM/customer number
+- Column headers (DESCRIPTION, QTY, RATE, AMOUNT, MRP)
+- Subtotal, Total, Gross Amount, Net Amount
+- Tax lines (VAT, GST, CGST, SGST)
+- Discounts, savings, "OFF MRP", promotional text
+- Cash/Card tendered, Change returned
+- "Thank you", "Visit again" messages
 
-If you cannot read the receipt or find no items, return: []`,
+PRICE EXTRACTION (critical):
+- Indian receipts have columns: DESCRIPTION | QTY | RATE | AMOUNT
+- RATE = price per unit (use this for the "price" field)
+- AMOUNT = line total (QTY × RATE) - do NOT use this as unit price
+- Extract QTY as-is for the "qty" field
+- If only one price column exists, divide by QTY to get unit price
+- Typical grocery prices: ₹20-500 per item. If you see ₹1000+, it's probably cash tendered (ignore it)
+- Also extract the NET AMOUNT / FINAL TOTAL from the receipt (after discounts and taxes)
+- Also extract the STORE NAME (e.g., D-MART, Big Bazaar, Spencer's, Reliance Fresh, etc.)
+
+Return ONLY a valid JSON object. No markdown, no explanation:
+{"items":[{"name":"Product Name 500g","qty":1,"price":123.00}],"net_total":730.00,"store_name":"D-MART"}
+
+If no products found, return: {"items":[],"net_total":0,"store_name":""}`,
               },
             ],
           },
@@ -331,35 +363,104 @@ If you cannot read the receipt or find no items, return: []`,
     });
 
     if (!response.ok) {
-      console.log('Groq Receipt: API error', response.status);
+      const errorText = await response.text();
+      console.log('Groq Receipt: API error', response.status, errorText);
       return null;
     }
 
     const data = await response.json();
     const text = data?.choices?.[0]?.message?.content || '';
-    console.log('Groq Receipt: Response:', text.substring(0, 200));
+    console.log('Groq Receipt: Response:', text.substring(0, 300));
 
     // Extract JSON from response (might be wrapped in markdown code block)
-    const jsonMatch = text.match(/\[[\s\S]*?\]/);
-    if (!jsonMatch) {
-      console.log('Groq Receipt: No JSON array found in response');
+    // Try object format first (new), then array format (legacy)
+    let parsedItems: any[] = [];
+    let netTotal = 0;
+    let storeName = '';
+
+    // Use greedy match to get the full JSON object (including nested braces)
+    const objectMatch = text.match(/\{[\s\S]*\}/);
+    const arrayMatch = text.match(/\[[\s\S]*\]/);
+
+    if (objectMatch) {
+      try {
+        const obj = JSON.parse(objectMatch[0]);
+        parsedItems = Array.isArray(obj.items) ? obj.items : [];
+        netTotal = parseFloat(obj.net_total) || 0;
+        storeName = String(obj.store_name || '').trim();
+        console.log('Groq Receipt: Parsed object format, net_total:', netTotal, 'store:', storeName);
+      } catch (e) {
+        console.log('Groq Receipt: Failed to parse object, trying array format');
+        // Try array format as fallback
+        if (arrayMatch) {
+          try {
+            parsedItems = JSON.parse(arrayMatch[0]);
+          } catch (e2) {
+            console.log('Groq Receipt: Failed to parse array format too');
+          }
+        }
+      }
+    } else if (arrayMatch) {
+      try {
+        parsedItems = JSON.parse(arrayMatch[0]);
+      } catch (e) {
+        console.log('Groq Receipt: Failed to parse array');
+      }
+    }
+
+    if (!Array.isArray(parsedItems) || parsedItems.length === 0) {
+      console.log('Groq Receipt: No items found in response');
       return null;
     }
 
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    // Patterns that indicate junk (not real products)
+    const junkPatterns = /\b(total|subtotal|amount|change|cash|card|tendered|tax|vat|gst|cgst|sgst|discount|off mrp|savings|thank|visit|invoice|bill no|receipt|c-mem|gstin|fssai|address|bangalore|mumbai|delhi|phone|mobile|\d{10,})\b/i;
 
     // Validate and clean the items
-    const items: ItemEntry[] = parsed
-      .filter((item: any) => item.name && typeof item.price === 'number' && item.price > 0)
+    const items: ItemEntry[] = parsedItems
+      .filter((item: any) => {
+        if (!item.name || typeof item.price !== 'number' || item.price <= 0) return false;
+        const name = String(item.name).toLowerCase();
+        // Filter out junk entries
+        if (junkPatterns.test(name)) return false;
+        // Filter out unreasonably high prices (likely cash tendered or totals)
+        if (item.price > 2000) return false;
+        // Filter out very short names (likely garbage)
+        if (name.replace(/[^a-z]/g, '').length < 3) return false;
+        return true;
+      })
       .map((item: any) => ({
         name: String(item.name).substring(0, 35),
         qty: Math.max(1, Math.min(parseInt(item.qty) || 1, 99)),
         price: Math.round(parseFloat(item.price) * 100) / 100,
       }));
 
-    console.log('Groq Receipt: Parsed', items.length, 'valid items');
-    return items.length > 0 ? items : null;
+    // Calculate sum of items
+    const itemsSum = items.reduce((sum, item) => sum + item.qty * item.price, 0);
+
+    // If net_total differs from items sum, add adjustment line
+    if (netTotal > 0 && Math.abs(itemsSum - netTotal) > 1) {
+      const adjustment = netTotal - itemsSum;
+      const adjustmentName = adjustment < 0 ? 'Discount' : 'Tax/Charges';
+      items.push({
+        name: adjustmentName,
+        qty: 1,
+        price: Math.round(adjustment * 100) / 100,
+      });
+      console.log('Groq Receipt: Added adjustment:', adjustmentName, adjustment);
+    }
+
+    console.log('Groq Receipt: Parsed', items.length, 'valid items, store:', storeName);
+    if (items.length === 0) return null;
+
+    // Calculate final total after adjustments
+    const finalTotal = items.reduce((sum, item) => sum + item.qty * item.price, 0);
+
+    return {
+      items,
+      netTotal: netTotal > 0 ? netTotal : finalTotal,
+      storeName,
+    };
 
   } catch (e) {
     console.log('Groq Receipt: Error:', e);
@@ -419,8 +520,8 @@ export default function AnnotationScreen() {
   const { updateTransaction, addTransaction, pendingTransaction, setPendingTransaction, transactions, budgets } = useTransactions();
 
   const isFromPending = !!pendingTransaction && !params.merchant;
-  const merchant = isFromPending ? pendingTransaction!.merchant : String(params.merchant || 'Unknown');
-  const amount = isFromPending ? String(pendingTransaction!.amount) : String(params.amount || '0');
+  const initialMerchant = isFromPending ? pendingTransaction!.merchant : String(params.merchant || 'Unknown');
+  const initialAmount = isFromPending ? String(pendingTransaction!.amount) : String(params.amount || '0');
   const date = isFromPending ? pendingTransaction!.date : String(params.date || '');
   const message = isFromPending ? pendingTransaction!.message : '';
   const index = isFromPending ? -1 : parseInt(String(params.index || '0'));
@@ -431,6 +532,8 @@ export default function AnnotationScreen() {
   const [aiLoading, setAiLoading] = useState(false);
   const [receiptScanning, setReceiptScanning] = useState(false);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [amount, setAmount] = useState(initialAmount);
+  const [merchant, setMerchant] = useState(initialMerchant);
 
   // Cart: structured items
   const [cartItems, setCartItems] = useState<ItemEntry[]>([]);
@@ -544,7 +647,7 @@ export default function AnnotationScreen() {
         result = await ImagePicker.launchCameraAsync({
           mediaTypes: ['images'],
           quality: 0.8,
-          base64: false, // ML Kit uses URI, not base64
+          base64: true,
         });
       } else {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -556,7 +659,7 @@ export default function AnnotationScreen() {
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           quality: 0.8,
-          base64: false, // ML Kit uses URI, not base64
+          base64: true,
         });
       }
 
@@ -571,17 +674,27 @@ export default function AnnotationScreen() {
       }
 
       const imageUri = result.assets[0].uri;
-      console.log('Receipt Scan: Got image:', imageUri);
+      const imageBase64 = result.assets[0].base64;
+      console.log('Receipt Scan: Got image:', imageUri, 'base64 length:', imageBase64?.length || 0);
       setReceiptScanning(true);
       setReceiptPreview(imageUri);
 
       // Try Groq Vision first (best accuracy), then fall back to on-device ML Kit
       console.log('Receipt Scan: Trying Groq Vision API...');
-      let items = await scanReceiptWithGroq(imageUri);
+      let items: ItemEntry[] | null = null;
       let scanMethod = 'Groq AI';
-      
+      let storeName = '';
+      let netTotal = 0;
+
+      const groqResult = imageBase64 ? await scanReceiptWithGroq(imageBase64) : null;
+      if (groqResult) {
+        items = groqResult.items;
+        storeName = groqResult.storeName;
+        netTotal = groqResult.netTotal;
+      }
+
       if (!items || items.length === 0) {
-        console.log('Receipt Scan: Gemini failed, trying on-device ML Kit...');
+        console.log('Receipt Scan: Groq failed, trying on-device ML Kit...');
         items = await scanReceiptOnDevice(imageUri);
         scanMethod = 'On-device OCR';
       }
@@ -595,24 +708,34 @@ export default function AnnotationScreen() {
         return;
       }
 
-      // Auto-categorize: find the most common category among scanned items
+      // Auto-categorize each item individually for accurate category breakdown
       const categoryCounts: Record<string, number> = {};
-      items.forEach(item => {
+      const categorizedItems = items.map(item => {
         const suggestion = getAISuggestion(item.name);
         const cat = suggestion.category;
         categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+        return { ...item, category: cat };
       });
       const dominantCategory = Object.entries(categoryCounts)
         .sort((a, b) => b[1] - a[1])[0]?.[0] || 'Other';
 
       setSelectedCategory(dominantCategory);
-      setCartItems(items);
+      setCartItems(categorizedItems);
       setReceiptScanning(false);
 
-      const totalScanned = items.reduce((sum, i) => sum + i.qty * i.price, 0);
+      const totalScanned = netTotal > 0 ? netTotal : items.reduce((sum, i) => sum + i.qty * i.price, 0);
+
+      // Update transaction amount to match scanned total
+      setAmount(totalScanned.toFixed(2));
+
+      // Update merchant name if store was detected
+      if (storeName) {
+        setMerchant(storeName);
+      }
+
       Alert.alert(
         '✅ Receipt Scanned!',
-        `Found ${items.length} items totalling ₹${totalScanned.toFixed(0)} (via ${scanMethod}).\nYou can edit items below.`
+        `Found ${items.length} items totalling ₹${totalScanned.toFixed(0)}${storeName ? ` at ${storeName}` : ''} (via ${scanMethod}).\nYou can edit items below.`
       );
     } catch (e) {
       console.log('Scan receipt error:', e);
@@ -766,7 +889,7 @@ export default function AnnotationScreen() {
       addTransaction({ amount: savedAmount, merchant, date, message, category: finalCategory, subCategory: finalSubCategory, notes: finalNotes, items: cartItems.length > 0 ? cartItems : undefined });
       setPendingTransaction(null);
     } else {
-      updateTransaction(index, finalCategory, finalNotes, undefined, finalSubCategory, txnId, cartItems.length > 0 ? cartItems : undefined);
+      updateTransaction(index, finalCategory, finalNotes, undefined, finalSubCategory, txnId, cartItems.length > 0 ? cartItems : undefined, merchant, savedAmount);
     }
 
     const checkBudgetAlert = async (category: string, txnAmount: number) => {
