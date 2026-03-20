@@ -1,50 +1,54 @@
-# Welcome to your Expo app 👋
+# Spendly 👋
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Spendly is a premium budget tracking app with AI-powered receipt scanning and automatic transaction categorization.
 
-## Get started
+## 🚀 Setup for Developers
 
-1. Install dependencies
+If you are a friend of the author or a new developer, follow these steps to get the app running:
 
-   ```bash
-   npm install
-   ```
+### 1. Prerequisite
+- [Node.js](https://nodejs.org/) installed.
+- [Expo Go](https://expo.dev/go) app on your Android/iOS device.
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
+### 2. Installation
 ```bash
-npm run reset-project
+# Clone the repository
+git clone git@github.com:shivanshm444/Spendly.git
+cd Spendly
+
+# Install dependencies
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 3. Environment Setup (CRITICAL)
+API keys and secrets are protected and not included in this repository. You must create your own `.env` file in the root directory:
 
-## Learn more
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+2. Open `.env` and fill in your own API keys:
+   - **Groq API Key**: Get it at [Groq Console](https://console.groq.com/keys) (Free, 14.4K requests/day).
+   - **Gemini API Key**: Get it at [Google AI Studio](https://aistudio.google.com/apikey).
+   - **Firebase Config**: Create a project at [Firebase Console](https://console.firebase.google.com/).
 
-To learn more about developing your project with Expo, look at the following resources:
+### 4. Firebase Android Setup
+- Download your `google-services.json` from Firebase and place it in the root directory.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### 5. Run the App
+```bash
+npx expo start
+```
+Scan the QR code with your **Expo Go** app to test!
 
-## Join the community
+## ✨ Key Features
+- **AI Receipt Scanner**: Powered by Groq Vision (meta-llama/llama-4-scout).
+- **Auto-Categorization**: Uses Gemini AI to categorize expenses.
+- **Premium UI**: Dark mode, glassmorphism, and Ionicons throughout.
+- **SMS Integration**: Automatically tracks bank SMS for instant updates.
 
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## 🛠 Tech Stack
+- **Frontend**: React Native (Expo)
+- **Backend**: Firebase (Auth & Firestore)
+- **AI**: Groq API (Vision), Gemini API (Text)
+- **Icons**: Ionicons (@expo/vector-icons)
