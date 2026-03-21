@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, StatusBar, Platform, AppState, Modal, TextInput, KeyboardAvoidingView, Animated } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useTransactions } from '../../context/TransactionContext';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
-import { auth } from '../../firebase.config';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Animated, AppState, KeyboardAvoidingView, Modal, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import SmsAndroid from 'react-native-get-sms-android';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useTransactions } from '../../context/TransactionContext';
+import { auth } from '../../firebase.config';
+
+let Notifications: any = null;
+try { Notifications = require('expo-notifications'); } catch (e) { /* Expo Go SDK 53+ */ }
 
 const parseBankSMS = (message: string, date: string) => {
   const amountMatch = message.match(/Rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i) ||
@@ -17,12 +20,50 @@ const parseBankSMS = (message: string, date: string) => {
   const isDebit = /debit|debited|spent|paid|deducted|withdrawn|purchase/i.test(message);
   if (!isDebit) return null;
   if (amount <= 0 || amount > 10000000) return null;
-  const merchantMatch = message.match(/at\s+([A-Za-z][A-Za-z\s.\-&']+?)(?:\.|,|\s+Avl|\s+on|\s+Ref)/i) ||
-    message.match(/to\s+([A-Za-z][A-Za-z\s.\-&']+?)(?:\s+Ref|\s+on|\.|,)/i) ||
-    message.match(/(?:at|to|for)\s+([A-Za-z0-9][A-Za-z0-9\s]+)/i);
-  const refMatch = message.match(/[Rr]ef\.?\s*(?:[Nn]o\.?)?\s*([A-Za-z0-9]+)/);
-  const ref = refMatch ? `Txn #${refMatch[1]}` : '';
-  const merchant = merchantMatch ? merchantMatch[1].trim().substring(0, 30) : ref || 'Bank Transaction';
+
+  // Enhanced merchant extraction for UPI and various formats
+  let merchant = '';
+
+  // Pattern 1: "paid to MERCHANT@UPI" or "paid to MERCHANT"
+  let match = message.match(/paid\s+to\s+([A-Za-z0-9@._-]+)/i);
+  if (match) {
+    merchant = match[1];
+    // Clean UPI handles: "uber@axl" → "uber", "swiggy@icici" → "swiggy"
+    if (merchant.includes('@')) {
+      merchant = merchant.split('@')[0];
+    }
+  }
+
+  // Pattern 2: "for VPA MERCHANT@UPI" or "for MERCHANT"
+  if (!merchant) {
+    match = message.match(/for\s+(?:VPA\s+)?([A-Za-z0-9@._-]+)/i);
+    if (match) {
+      merchant = match[1];
+      if (merchant.includes('@')) {
+        merchant = merchant.split('@')[0];
+      }
+    }
+  }
+
+  // Pattern 3: "at MERCHANT"
+  if (!merchant) {
+    match = message.match(/at\s+([A-Za-z][A-Za-z\s.\-&']+?)(?:\.|,|\s+Avl|\s+on|\s+via|\s+Ref)/i);
+    if (match) merchant = match[1].trim();
+  }
+
+  // Fallback: extract reference number if no merchant found
+  if (!merchant) {
+    const refMatch = message.match(/[Rr]ef\.?\s*(?:[Nn]o\.?)?\s*([A-Za-z0-9]+)/);
+    merchant = refMatch ? `Txn #${refMatch[1]}` : 'Bank Transaction';
+  }
+
+  // Clean up merchant name
+  merchant = merchant.trim().substring(0, 30);
+  // Capitalize first letter of each word
+  merchant = merchant.split(/[\s@._-]+/).map(word =>
+    word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+  ).join(' ');
+
   return { amount, merchant, date, message, category: '', notes: '' };
 };
 
@@ -121,6 +162,39 @@ export default function HomeScreen() {
     }
   }, [isLoaded, transactions.length]);
 
+  // Request notification permissions
+  useEffect(() => {
+    const requestNotificationPermissions = async () => {
+      if (Notifications?.requestPermissionsAsync) {
+        try {
+          const { status } = await Notifications.requestPermissionsAsync();
+          if (status !== 'granted') {
+            console.log('Notification permission not granted');
+          }
+        } catch (e) {
+          console.log('Notification permission error:', e);
+        }
+      }
+    };
+    requestNotificationPermissions();
+
+    // Handle notification taps
+    let subscription: any = null;
+    if (Notifications?.addNotificationResponseReceivedListener) {
+      subscription = Notifications.addNotificationResponseReceivedListener((response: any) => {
+        const data = response.notification.request.content.data;
+        if (data?.action === 'categorize') {
+          // Navigate to categorization screen
+          router.push('/annotation');
+        }
+      });
+    }
+
+    return () => {
+      if (subscription?.remove) subscription.remove();
+    };
+  }, [router]);
+
   const monthOptions = generateMonthOptions();
   const [selectedMonth, setSelectedMonth] = useState(monthOptions[0].key);
   const currentMonthData = monthOptions.find(m => m.key === selectedMonth)!;
@@ -189,8 +263,29 @@ export default function HomeScreen() {
       setTransactions([...merged]);
       setFetched(true);
       const newest = newTxns[0];
+
+      // Set pending transaction for categorization
       setPendingTransaction({ amount: newest.amount, merchant: newest.merchant, date: newest.date, message: newest.message || '', category: '', notes: '' });
-      router.push('/annotation');
+
+      // Send notification - user can tap to categorize
+      if (Notifications?.scheduleNotificationAsync) {
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: '💳 New Transaction Fetched!',
+              body: `₹${newest.amount.toFixed(0)} at ${newest.merchant}\nTap to categorize`,
+              sound: true,
+              data: {
+                action: 'categorize',
+                transaction: newest
+              }
+            },
+            trigger: null, // Show immediately
+          });
+        } catch (e) {
+          console.log('Notification error:', e);
+        }
+      }
     }
   }, [fetchAndParseSms, setTransactions, setPendingTransaction, router]);
 
