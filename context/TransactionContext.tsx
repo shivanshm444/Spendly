@@ -117,7 +117,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       const merged = t.map(newTxn => {
         const existing = prev.find(ex => tid(ex) === tid(newTxn));
         if (existing && existing.category) {
-          return { ...newTxn, category: existing.category, notes: existing.notes, splits: existing.splits, subCategory: existing.subCategory };
+          return { ...newTxn, category: existing.category, notes: existing.notes, splits: existing.splits, subCategory: existing.subCategory, items: existing.items };
         }
         return newTxn;
       });
